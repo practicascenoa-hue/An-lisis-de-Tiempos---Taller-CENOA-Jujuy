@@ -1,36 +1,41 @@
-import streamlit as st
-import pandas as pd
+st.subheader("Análisis de Tiempo - Daño C")
 
-st.title("Portal Taller CENOA")
-st.subheader("Análisis - Tipo de Daños (A,B,C)")
+# Filtrar solo Daño C
+df_c = df[df["Tipo de Daño"] == "C"].copy()
 
-# ID de tu sheet
-SHEET_ID = "1bNgFg5s-1qZuToCInLqCJr4FAUK51m7lrClilBZojb8"
+if df_c.empty:
+    st.warning("No hay registros con Daño C")
+    st.stop()
 
-# ⚠️ Reemplazar con el gid correcto de la hoja "Tipo de Daños (A,B,C)"
-GID = "99557603"
+# Convertir columna de tiempo a numérica
+df_c["Dif (2)"] = pd.to_numeric(df_c["Dif (2)"], errors="coerce")
 
-url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}"
+# ---------------- KPI PRINCIPALES ----------------
 
-# Leer datos
-df = pd.read_csv(url)
+col1, col2 = st.columns(2)
 
-st.write("Vista previa de datos")
-st.dataframe(df)
+col1.metric("Cantidad registros Daño C", len(df_c))
+col2.metric("Promedio general horas", round(df_c["Dif (2)"].mean(), 2))
 
-# --- ANALISIS ---
+# ---------------- TIEMPO POR ETAPA ----------------
 
-# Suponiendo que la columna se llama "Tipo de Daño"
-if "Tipo de Daño" in df.columns:
-    
-    resumen = df["Tipo de Daño"].value_counts().reset_index()
-    resumen.columns = ["Tipo de Daño", "Cantidad"]
+st.subheader("Promedio de Horas por Etapa")
 
-    st.subheader("Cantidad por Tipo de Daño")
-    st.dataframe(resumen)
+resumen_etapas = (
+    df_c
+    .groupby("Etapas")["Dif (2)"]
+    .mean()
+    .reset_index()
+    .sort_values(by="Dif (2)", ascending=False)
+)
 
-    st.bar_chart(resumen.set_index("Tipo de Daño"))
+st.dataframe(resumen_etapas)
+st.bar_chart(resumen_etapas.set_index("Etapas"))
 
-else:
-    st.warning("No se encontró la columna 'Tipo de Daño'")
+# ---------------- TIEMPO TOTAL POR PATENTE ----------------
 
+st.subheader("Tiempo Total por Vehículo (Patente)")
+
+resumen_patente = (
+    df_c
+    .groupby("P
