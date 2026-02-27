@@ -8,7 +8,7 @@ st.subheader("Análisis - Tipo de Daños (A,B,C)")
 SHEET_ID = "1bNgFg5s-1qZuToCInLqCJr4FAUK51m7lrClilBZojb8"
 
 # ⚠️ Reemplazar con el gid correcto de la hoja "Tipo de Daños (A,B,C)"
-GID = "0"
+GID = "99557603"
 
 url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}"
 
