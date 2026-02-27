@@ -38,4 +38,11 @@ st.subheader("Tiempo Total por Vehículo (Patente)")
 
 resumen_patente = (
     df_c
-    .groupby("P
+    .groupby("Patente")["Dif (2)"]
+    .sum()
+    .reset_index()
+    .sort_values(by="Dif (2)", ascending=False)
+)
+
+st.dataframe(resumen_patente)
+st.bar_chart(resumen_patente.set_index("Patente"))
