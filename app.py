@@ -1,25 +1,56 @@
+import streamlit as st
+import pandas as pd
+
+# ---------------- CONFIGURACION ----------------
+
+st.set_page_config(page_title="Portal Taller CENOA", layout="wide")
+
+st.title("Portal Taller CENOA")
 st.subheader("Análisis de Tiempo - Daño C")
 
-# Filtrar solo Daño C
+# ---------------- CARGA DE DATOS ----------------
+
+SHEET_ID = "1bNgFg5s-1qZuToCInLqCJr4FAUK51m7lrClilBZojb8"
+
+# ⚠️ REEMPLAZAR POR EL GID REAL DE LA HOJA "Tipo de Daños (A,B,C)"
+GID = "99557603"
+
+url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}"
+
+@st.cache_data
+def cargar_datos():
+    return pd.read_csv(url)
+
+try:
+    df = cargar_datos()
+except:
+    st.error("Error al cargar la hoja. Verificar permisos o GID.")
+    st.stop()
+
+# ---------------- FILTRAR DAÑO C ----------------
+
 df_c = df[df["Tipo de Daño"] == "C"].copy()
 
 if df_c.empty:
     st.warning("No hay registros con Daño C")
     st.stop()
 
-# Convertir columna de tiempo a numérica
+# Convertir tiempo a numérico
 df_c["Dif (2)"] = pd.to_numeric(df_c["Dif (2)"], errors="coerce")
 
 # ---------------- KPI PRINCIPALES ----------------
 
-col1, col2 = st.columns(2)
+st.markdown("### Indicadores Generales")
 
-col1.metric("Cantidad registros Daño C", len(df_c))
-col2.metric("Promedio general horas", round(df_c["Dif (2)"].mean(), 2))
+col1, col2, col3 = st.columns(3)
 
-# ---------------- TIEMPO POR ETAPA ----------------
+col1.metric("Cantidad Registros Daño C", len(df_c))
+col2.metric("Promedio General (Horas)", round(df_c["Dif (2)"].mean(), 2))
+col3.metric("Total Horas Acumuladas", round(df_c["Dif (2)"].sum(), 2))
 
-st.subheader("Promedio de Horas por Etapa")
+# ---------------- ANALISIS POR ETAPA ----------------
+
+st.markdown("### Promedio de Horas por Etapa")
 
 resumen_etapas = (
     df_c
@@ -29,12 +60,12 @@ resumen_etapas = (
     .sort_values(by="Dif (2)", ascending=False)
 )
 
-st.dataframe(resumen_etapas)
+st.dataframe(resumen_etapas, use_container_width=True)
 st.bar_chart(resumen_etapas.set_index("Etapas"))
 
-# ---------------- TIEMPO TOTAL POR PATENTE ----------------
+# ---------------- ANALISIS POR PATENTE ----------------
 
-st.subheader("Tiempo Total por Vehículo (Patente)")
+st.markdown("### Tiempo Total por Vehículo (Patente)")
 
 resumen_patente = (
     df_c
@@ -44,5 +75,10 @@ resumen_patente = (
     .sort_values(by="Dif (2)", ascending=False)
 )
 
-st.dataframe(resumen_patente)
+st.dataframe(resumen_patente, use_container_width=True)
 st.bar_chart(resumen_patente.set_index("Patente"))
+
+# ---------------- DETALLE ----------------
+
+st.markdown("### Detalle Completo - Daño C")
+st.dataframe(df_c[["Patente", "Etapas", "Dif (2)"]], use_container_width=True)
