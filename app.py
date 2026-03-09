@@ -44,7 +44,41 @@ def load_data():
             cols = [c for c in df.columns if 'daño' in c.lower() or 'dano' in c.lower()]
             if cols: df.rename(columns={cols[0]: 'Tipo de Daño'}, inplace=True)
             
-        df['Dif (2)'] = pd.to_numeric(df['Dif (2)'], errors='coerce').fillna(0)
+        # =========================================================================
+        # NUEVO MOTOR DE CÁLCULO DE HORAS (Ignora fechas y fines de semana del Excel)
+        # =========================================================================
+        def parse_time(val):
+            val = str(val).strip().upper()
+            if val in ['', 'NAN', 'NAT', 'NULL', 'NONE']: return None
+            # Si Excel exportó "2026-01-05 17:00:00", esto corta la fecha y se queda solo con "17:00:00"
+            if ' ' in val: 
+                val = val.split(' ')[-1]
+            try:
+                parts = val.split(':')
+                if len(parts) >= 2:
+                    return float(parts[0]) + float(parts[1])/60.0
+                return float(val)
+            except:
+                return None
+
+        def calc_diff(row):
+            en = parse_time(row.get('Entra (2)'))
+            sa = parse_time(row.get('Salid (2)'))
+            if en is not None and sa is not None:
+                d = sa - en
+                return d + 24.0 if d < 0 else d # Si cruza la medianoche (ej 22:00 a 02:00), suma 24 para dar 4h reales.
+            
+            # Fallback de seguridad: Si no anotaron Entrada/Salida, intenta usar el Dif(2) original del Excel
+            try:
+                val = str(row.get('Dif (2)', 0)).replace(',', '.')
+                return float(val) if pd.notna(float(val)) else 0.0
+            except:
+                return 0.0
+
+        # Sobrescribimos la columna Dif (2) con nuestro cálculo puro
+        df['Dif (2)'] = df.apply(calc_diff, axis=1)
+        # =========================================================================
+
         df['PAÑOS'] = pd.to_numeric(df['PAÑOS'], errors='coerce')
         df['Operario'] = df['Operario'].astype(str).str.upper().str.strip()
         df['Etapas'] = df['Etapas'].astype(str).str.upper().str.strip()
@@ -205,7 +239,7 @@ try:
                 st.plotly_chart(fig_comp, use_container_width=True)
 
             # --------------------------------------------------------------------------------
-            # NUEVA SECCIÓN: LÍNEA DE VIDA Y TIEMPO MUERTO (ALINEADO AL MÁXIMO)
+            # LÍNEA DE VIDA Y TIEMPO MUERTO (ALINEADO AL MÁXIMO)
             # --------------------------------------------------------------------------------
             st.divider()
             st.subheader(f"🚗 Flujograma de Tiempos por Vehículo - DAÑO {tipo}")
@@ -214,23 +248,18 @@ try:
             df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '')].copy()
 
             if not df_vehiculos.empty:
-                # 1. Agrupamos por vehículo y bloque sumando el tiempo real
                 agrupado = df_vehiculos.groupby(['Patente', 'Bloque'])['Dif (2)'].sum().reset_index()
                 agrupado.rename(columns={'Dif (2)': 'Trabajo_Real'}, inplace=True)
 
-                # 2. Encontramos el tiempo máximo por cada bloque
                 max_por_bloque = agrupado.groupby('Bloque')['Trabajo_Real'].max().reset_index()
                 max_por_bloque.rename(columns={'Trabajo_Real': 'Max_Bloque'}, inplace=True)
 
-                # 3. Unimos y calculamos el tiempo muerto (Diferencia contra el máximo del bloque)
                 agrupado = agrupado.merge(max_por_bloque, on='Bloque')
                 agrupado['Tiempo_Muerto'] = agrupado['Max_Bloque'] - agrupado['Trabajo_Real']
-                # Filtramos para ignorar diferencias minúsculas de segundos por redondeo
                 agrupado['Tiempo_Muerto'] = agrupado['Tiempo_Muerto'].apply(lambda x: x if x > 0.01 else 0)
 
                 orden_bloques = sorted(agrupado['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
 
-                # Lógica para establecer un "Carril" fijo de inicio en el eje X para cada Bloque
                 base_dict = {}
                 current_base = 0
                 tick_vals = []
@@ -240,14 +269,11 @@ try:
                     base_dict[b] = current_base
                     tick_vals.append(current_base)
                     tick_texts.append(b.split('. ')[-1])
-                    # El siguiente bloque comenzará después del máximo de este bloque + 0.5h margen visual
                     max_dur = max_por_bloque[max_por_bloque['Bloque'] == b]['Max_Bloque'].values[0]
                     current_base += (max_dur + 0.5) 
 
-                # Construir DataFrame final para el gráfico apilado
                 plot_data = []
                 for idx, row in agrupado.iterrows():
-                    # Tramo 1: Trabajo Efectivo (Barra a color)
                     plot_data.append({
                         'Patente': row['Patente'],
                         'Bloque': row['Bloque'],
@@ -257,7 +283,6 @@ try:
                         'Orden': int(row['Bloque'].split('.')[0]),
                         'Texto': format_hours(row['Trabajo_Real'])
                     })
-                    # Tramo 2: Tiempo Muerto (Barra Gris pegada a la anterior)
                     if row['Tiempo_Muerto'] > 0:
                         plot_data.append({
                             'Patente': row['Patente'],
@@ -265,23 +290,20 @@ try:
                             'Tipo': '⏳ Tiempo Muerto',
                             'Duracion': row['Tiempo_Muerto'],
                             'Base_Inicio': base_dict[row['Bloque']] + row['Trabajo_Real'],
-                            'Orden': int(row['Bloque'].split('.')[0]) + 0.5, # Para que se apile después del color
+                            'Orden': int(row['Bloque'].split('.')[0]) + 0.5,
                             'Texto': format_hours(row['Tiempo_Muerto']) + " (M)"
                         })
 
                 df_plot = pd.DataFrame(plot_data)
                 df_plot = df_plot.sort_values(['Patente', 'Orden'])
 
-                # Ordenar autos por tiempo TOTAL real trabajado para el eje Y
                 orden_patentes = agrupado.groupby('Patente')['Trabajo_Real'].sum().sort_values(ascending=True).index
 
-                # Paleta de Colores
-                color_map = {'⏳ Tiempo Muerto': '#e0e0e0'} # Gris claro para tiempo muerto
+                color_map = {'⏳ Tiempo Muerto': '#e0e0e0'} 
                 colores_base = px.colors.qualitative.Plotly
                 for i, b in enumerate(orden_bloques):
                     color_map[b] = colores_base[i % len(colores_base)]
 
-                # Gráfico final
                 fig_vehiculos = px.bar(
                     df_plot,
                     x='Duracion',
@@ -289,7 +311,7 @@ try:
                     base='Base_Inicio',
                     color='Tipo',
                     orientation='h',
-                    text='Texto', # Muestra el texto directamente sobre la barra
+                    text='Texto', 
                     title=f"Línea de Vida Alineada y Tiempo Muerto (Daño {tipo})",
                     labels={'Duracion': 'Horas', 'Patente': 'Patente'},
                     hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden': False, 'Tipo': False},
@@ -304,7 +326,7 @@ try:
                     xaxis=dict(
                         tickmode='array',
                         tickvals=tick_vals,
-                        ticktext=tick_texts, # Escribe CHAPA, PREPARADO en el Eje X superior
+                        ticktext=tick_texts, 
                         title="",
                         gridcolor='rgba(200, 200, 200, 0.2)'
                     ),
@@ -317,13 +339,10 @@ try:
                     )
                 )
 
-                # Líneas verticales guía para inicio exacto de bloques
                 for val in tick_vals:
                     fig_vehiculos.add_vline(x=val, line_dash="dot", line_color="gray", opacity=0.7)
 
-                # Configuración para que los textos siempre se lean bien dentro o fuera de la barra
                 fig_vehiculos.update_traces(textposition='auto', textfont_size=11)
-                
                 st.plotly_chart(fig_vehiculos, use_container_width=True)
             else:
                 st.warning(f"No hay registros de patentes válidas para graficar el flujograma del Daño {tipo}.")
