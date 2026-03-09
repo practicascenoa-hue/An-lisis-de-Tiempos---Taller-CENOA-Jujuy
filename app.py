@@ -49,6 +49,8 @@ def load_data():
         df['Operario'] = df['Operario'].astype(str).str.upper().str.strip()
         df['Etapas'] = df['Etapas'].astype(str).str.upper().str.strip()
         df['Tipo de Daño'] = df['Tipo de Daño'].astype(str).str.upper().str.strip()
+        # Asegurarnos de limpiar espacios en las patentes para contarlas bien
+        df['Patente'] = df['Patente'].astype(str).str.upper().str.strip() 
         
         return df
     except Exception:
@@ -121,12 +123,21 @@ try:
         
         if mes_sel == "Enero":
             st.write("### Seleccione Tipo de Daño:")
+            
+            # --- CÁLCULO DE PATENTES ÚNICAS POR DAÑO ---
+            # Filtramos excluyendo valores nulos o "NAN" en Patente para un conteo exacto
+            df_patentes = df[df['Patente'] != 'NAN'] 
+            cant_a = df_patentes[df_patentes['Tipo Limpio'] == 'A']['Patente'].nunique()
+            cant_b = df_patentes[df_patentes['Tipo Limpio'] == 'B']['Patente'].nunique()
+            cant_c = df_patentes[df_patentes['Tipo Limpio'] == 'C']['Patente'].nunique()
+            
             col_a, col_b, col_c = st.columns(3)
             if 'tipo_dano' not in st.session_state: st.session_state.tipo_dano = 'A'
             
-            if col_a.button("DAÑO A"): st.session_state.tipo_dano = 'A'
-            if col_b.button("DAÑO B"): st.session_state.tipo_dano = 'B'
-            if col_c.button("DAÑO C"): st.session_state.tipo_dano = 'C'
+            # --- BOTONES ACTUALIZADOS CON LA CANTIDAD DE VEHÍCULOS ---
+            if col_a.button(f"DAÑO A ({cant_a} Vehículos)"): st.session_state.tipo_dano = 'A'
+            if col_b.button(f"DAÑO B ({cant_b} Vehículos)"): st.session_state.tipo_dano = 'B'
+            if col_c.button(f"DAÑO C ({cant_c} Vehículos)"): st.session_state.tipo_dano = 'C'
             
             tipo = st.session_state.tipo_dano
             df_final = df[(df['Tipo Limpio'] == tipo) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
@@ -203,12 +214,11 @@ try:
             st.info(f"No hay datos cargados para {mes_sel}.")
 
     # --------------------------------------------------------------------------------
-    # 5. SUBMENÚ: PRODUCTIVIDAD DE OPERARIOS (VERSIÓN AUDITORÍA PRO)
+    # 5. SUBMENÚ: PRODUCTIVIDAD DE OPERARIOS
     # --------------------------------------------------------------------------------
     elif opcion == "👨‍🔧 Productividad de Operarios":
         st.title("👨‍🔧 Auditoría y Productividad de Operarios")
         
-        # 1. Filtros Espejo
         col_filtro1, col_filtro2 = st.columns(2)
         with col_filtro1:
             mes_op = st.selectbox("Mes:", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], key="mes_op")
@@ -222,33 +232,25 @@ try:
                 st.divider()
                 st.subheader(f"Matriz de Eficiencia - DAÑO {tipo_dano_op}")
                 
-                # Seleccionar Bloque Técnico a analizar
                 bloque_sel = st.selectbox("Seleccione Fase Técnica para analizar al personal:", list(MAPEO_BLOQUES.keys()))
                 
                 df_bloque = df_op_filtrado[df_op_filtrado['Bloque'] == bloque_sel]
                 
                 if not df_bloque.empty:
-                    # Cálculo del promedio general (La línea de corte)
                     avg_ref = df_bloque['Dif (2)'].mean()
                     
-                    # Agrupar por operario calculando Promedio de horas y Volumen (Vehículos y Paños reales)
                     df_ranking = df_bloque.groupby('Operario').agg(
                         Tiempo_Promedio=('Dif (2)', 'mean'),
                         Vehiculos=('Ref.OR', 'nunique')
                     ).reset_index()
                     
-                    # Para no duplicar paños si hicieron varias tareas en un mismo auto:
                     panos_reales = df_bloque.groupby(['Operario', 'Ref.OR'])['PAÑOS'].first().groupby('Operario').sum().reset_index()
                     df_ranking = df_ranking.merge(panos_reales, on='Operario', how='left')
                     
-                    # Determinar eficiencia
                     df_ranking['Estado'] = df_ranking['Tiempo_Promedio'].apply(lambda x: '⚠️ Lento' if x > avg_ref else '✅ Rápido/Eficiente')
                     df_ranking['Tiempo (H:M)'] = df_ranking['Tiempo_Promedio'].apply(format_hours)
-                    
-                    # Ordenar del más rápido al más lento
                     df_ranking = df_ranking.sort_values('Tiempo_Promedio', ascending=True)
 
-                    # Gráfico de barras horizontales (Ranking Visual)
                     fig_ranking = px.bar(
                         df_ranking, 
                         x='Tiempo_Promedio', 
@@ -266,7 +268,6 @@ try:
                     
                     st.plotly_chart(fig_ranking, use_container_width=True)
 
-                    # --- Ficha Individual del Operario ---
                     st.divider()
                     st.subheader("🔎 Ficha Técnica de Operario (Deep Dive)")
                     operario_sel = st.selectbox("Seleccione un técnico para auditar su volumen:", df_ranking['Operario'].tolist())
@@ -278,12 +279,10 @@ try:
                     col_met2.metric("Vehículos Intervenidos", int(datos_op['Vehiculos']))
                     col_met3.metric("Volumen (Paños Trabajados)", int(datos_op['PAÑOS']) if pd.notnull(datos_op['PAÑOS']) else 0)
                     
-                    # --- Auditoría de Patentes Críticas ---
                     st.divider()
                     st.subheader("🚗 Auditoría de Patentes Críticas (Responsabilidad)")
                     st.write(f"Casos donde **{operario_sel}** superó el tiempo promedio esperado de **{format_hours(avg_ref)}** en **{bloque_sel}**.")
                     
-                    # Filtramos las filas de este operario, en este bloque, que superen el promedio general
                     df_lentos_op = df_bloque[(df_bloque['Operario'] == operario_sel) & (df_bloque['Dif (2)'] > avg_ref)].sort_values(by='Dif (2)', ascending=False)
                     
                     if not df_lentos_op.empty:
