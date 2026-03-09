@@ -49,7 +49,6 @@ def load_data():
         df['Operario'] = df['Operario'].astype(str).str.upper().str.strip()
         df['Etapas'] = df['Etapas'].astype(str).str.upper().str.strip()
         df['Tipo de Daño'] = df['Tipo de Daño'].astype(str).str.upper().str.strip()
-        # Asegurarnos de limpiar espacios en las patentes para contarlas bien
         df['Patente'] = df['Patente'].astype(str).str.upper().str.strip() 
         
         return df
@@ -124,9 +123,7 @@ try:
         if mes_sel == "Enero":
             st.write("### Seleccione Tipo de Daño:")
             
-            # --- CÁLCULO DE PATENTES ÚNICAS POR DAÑO ---
-            # Filtramos excluyendo valores nulos o "NAN" en Patente para un conteo exacto
-            df_patentes = df[df['Patente'] != 'NAN'] 
+            df_patentes = df[(df['Patente'] != 'NAN') & (df['Patente'] != '') & (df['Patente'].notna())] 
             cant_a = df_patentes[df_patentes['Tipo Limpio'] == 'A']['Patente'].nunique()
             cant_b = df_patentes[df_patentes['Tipo Limpio'] == 'B']['Patente'].nunique()
             cant_c = df_patentes[df_patentes['Tipo Limpio'] == 'C']['Patente'].nunique()
@@ -134,7 +131,6 @@ try:
             col_a, col_b, col_c = st.columns(3)
             if 'tipo_dano' not in st.session_state: st.session_state.tipo_dano = 'A'
             
-            # --- BOTONES ACTUALIZADOS CON LA CANTIDAD DE VEHÍCULOS ---
             if col_a.button(f"DAÑO A ({cant_a} Vehículos)"): st.session_state.tipo_dano = 'A'
             if col_b.button(f"DAÑO B ({cant_b} Vehículos)"): st.session_state.tipo_dano = 'B'
             if col_c.button(f"DAÑO C ({cant_c} Vehículos)"): st.session_state.tipo_dano = 'C'
@@ -179,6 +175,7 @@ try:
             else:
                 st.warning(f"No hay registros del Daño {tipo} clasificados en las fases estándar operativas.")
 
+            # --- COMPARATIVA DE BLOQUES ---
             st.divider()
             st.subheader("📊 Comparativa de Tiempos por Bloque (Daño A vs B vs C)")
             st.write("Nota: Esta gráfica compara el tiempo promedio de cada bloque principal independientemente de las actividades internas que las componen")
@@ -202,13 +199,59 @@ try:
                     labels={'Dif (2)': 'Promedio en Horas', 'Bloque': 'Fases del Taller', 'Tipo Limpio': 'Tipo de Daño'},
                     color_discrete_map={'A': '#00cc96', 'B': '#ff9900', 'C': '#ef553b'}
                 )
-                
                 fig_comp.update_traces(textposition='outside', textfont_size=10)
                 fig_comp.update_layout(yaxis_title="Horas Promedio", xaxis_title="", legend_title="Daño")
-                
                 st.plotly_chart(fig_comp, use_container_width=True)
+
+            # --------------------------------------------------------------------------------
+            # NUEVA SECCIÓN: LÍNEA DE VIDA POR VEHÍCULO (FLUJOGRAMA)
+            # --------------------------------------------------------------------------------
+            st.divider()
+            st.subheader(f"🚗 Flujograma de Tiempos por Vehículo - DAÑO {tipo}")
+            st.write("Visualiza el recorrido cronológico de cada vehículo (Patente). Cada segmento representa la suma de horas invertidas en ese bloque específico.")
+
+            # Filtramos solo los que tienen patente real para este daño específico
+            df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '')].copy()
+
+            if not df_vehiculos.empty:
+                # Agrupar las horas invertidas por Patente y por Bloque
+                df_gantt = df_vehiculos.groupby(['Patente', 'Bloque'])['Dif (2)'].sum().reset_index()
+                
+                # Le sacamos el número al bloque para ordenar cronológicamente la barra
+                df_gantt['Orden'] = df_gantt['Bloque'].str.extract(r'(\d+)').astype(int)
+                df_gantt = df_gantt.sort_values(['Patente', 'Orden'])
+                df_gantt['Tiempo (H:M)'] = df_gantt['Dif (2)'].apply(format_hours)
+
+                # Ordenar el eje Y (Patentes) para que los autos que tardaron MÁS queden arriba
+                orden_patentes = df_gantt.groupby('Patente')['Dif (2)'].sum().sort_values(ascending=True).index
+                # Lista de bloques ordenados del 1 al 10 para que se apilen correctamente
+                orden_bloques = sorted(df_gantt['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
+
+                # Gráfico de Barras Apiladas (Stacked Bar Chart)
+                fig_vehiculos = px.bar(
+                    df_gantt,
+                    x='Dif (2)',
+                    y='Patente',
+                    color='Bloque',
+                    orientation='h',
+                    title=f"Tiempo Total de Intervención por Auto (Daño {tipo})",
+                    labels={'Dif (2)': 'Total de Horas', 'Patente': 'Patente'},
+                    hover_data={'Tiempo (H:M)': True, 'Dif (2)': False, 'Orden': False},
+                    category_orders={'Patente': orden_patentes, 'Bloque': orden_bloques} # Fuerza el orden lógico
+                )
+                
+                # Configuramos barmode='stack' para que se comporten como un flujo de tiempo
+                fig_vehiculos.update_layout(
+                    barmode='stack', 
+                    height=max(400, len(orden_patentes) * 35), # Se estira automáticamente si hay muchos autos
+                    legend_title="Flujo Técnico",
+                    xaxis_title="Acumulado de Horas Trabajadas",
+                    yaxis_title=""
+                )
+                
+                st.plotly_chart(fig_vehiculos, use_container_width=True)
             else:
-                st.warning("No hay datos suficientes para generar la comparativa global.")
+                st.warning(f"No hay registros de patentes válidas para graficar el flujograma del Daño {tipo}.")
 
         else:
             st.info(f"No hay datos cargados para {mes_sel}.")
@@ -233,7 +276,6 @@ try:
                 st.subheader(f"Matriz de Eficiencia - DAÑO {tipo_dano_op}")
                 
                 bloque_sel = st.selectbox("Seleccione Fase Técnica para analizar al personal:", list(MAPEO_BLOQUES.keys()))
-                
                 df_bloque = df_op_filtrado[df_op_filtrado['Bloque'] == bloque_sel]
                 
                 if not df_bloque.empty:
