@@ -4,24 +4,24 @@ import io
 import requests
 import plotly.express as px
 
-# 1. CONFIGURACIÓN DE PÁGINA
+# 1. CONFIGURACIÓN DE PÁGINA (Identidad del Taller)
 st.set_page_config(
     page_title="Taller CENOA Jujuy - Análisis de Tiempos",
     page_icon="📊",
     layout="wide"
 )
 
-# Estilo corporativo
+# Estilo visual corporativo (CSS)
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #dee2e6; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #dee2e6; }
     .sidebar-footer { position: fixed; bottom: 20px; width: 260px; font-size: 11px; color: #666; padding: 10px; border-top: 1px solid #ddd; }
-    h1, h2 { color: #002366; font-family: 'Segoe UI', sans-serif; }
+    h1, h2 { color: #002366; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. FUNCIONES DE APOYO
+# 2. FUNCIONES DE PROCESAMIENTO
 def format_hours(decimal_hours):
     if pd.isna(decimal_hours) or decimal_hours <= 0: return "0h 00m"
     hours = int(decimal_hours)
@@ -35,26 +35,27 @@ def load_data():
     csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Tipo%20de%20Daños%20(A,B,C)"
     response = requests.get(csv_url)
     df = pd.read_csv(io.StringIO(response.text))
-    # Limpieza técnica
+    # Limpieza de datos según criterios de Autolux
     df['Dif (2)'] = pd.to_numeric(df['Dif (2)'], errors='coerce').fillna(0)
-    df['PAÑOS'] = pd.to_numeric(df['PAÑOS'], errors='coerce') # Dejamos NaNs para poder filtrar
+    df['PAÑOS'] = pd.to_numeric(df['PAÑOS'], errors='coerce')
     df['Operario'] = df['Operario'].astype(str).str.upper().str.strip()
     df['Patente'] = df['Patente'].astype(str).str.upper().str.strip()
     return df
 
-# 3. PROCESAMIENTO
+# 3. CARGA Y FILTRADO INICIAL
 try:
     df_raw = load_data()
-    # Filtro de personal técnico (excluyendo administrativos)
+    # Exclusión de personal administrativo solicitada
     excluir_ops = ["ANDREA MARTINS", "JAVIER GUTIERREZ", "SAMUEL ANTUNEZ"]
     df = df_raw[~df_raw['Operario'].isin(excluir_ops)].copy()
 
-    # 4. SIDEBAR
+    # 4. SIDEBAR (Navegación y Datos de Contacto)
     with st.sidebar:
         st.title("Taller CENOA")
         st.subheader("Gestión de Calidad")
         st.divider()
         
+        # Aquí defines los nombres de tus submenús
         opcion = st.radio(
             "Navegación:",
             ["🏠 Inicio", "📈 Eficiencia por Daño", "👨‍🔧 Productividad de Operarios"],
@@ -72,21 +73,24 @@ try:
             unsafe_allow_html=True
         )
 
-    # 5. CONTENIDO DE LOS SUBMENÚS
+    # 5. CONTENIDO DE LOS SUBMENÚS (Secciones del Portal)
+    
+    # --- SUBMENÚ: INICIO ---
     if opcion == "🏠 Inicio":
         st.title("Análisis de tiempo - Taller CENOA Jujuy")
         st.write("---")
         st.subheader("Indicadores Generales del Mes")
         
-        # Cálculo de Órdenes Analizadas (Filtro por columna PAÑOS con datos)
-        ordenes_con_panos = df[df['PAÑOS'].notna() & (df['PAÑOS'] > 0)]['Ref.OR'].nunique()
+        # Cálculo: Órdenes con datos en la columna PAÑOS
+        ordenes_analizadas = df[df['PAÑOS'].notna() & (df['PAÑOS'] > 0)]['Ref.OR'].nunique()
         
         col1, col2 = st.columns(2)
         with col1:
-            st.metric(label="Total de orden analizada", value=ordenes_con_panos)
+            st.metric(label="Total de orden analizada", value=ordenes_analizadas)
         with col2:
             st.metric(label="Operarios de planta", value=12)
 
+    # --- SUBMENÚ: EFICIENCIA POR DAÑO ---
     elif opcion == "📈 Eficiencia por Daño":
         st.title("📈 Semáforo de Eficiencia por Etapa")
         tipo_dano = st.selectbox("Seleccione Tipo de Daño:", ["A", "B", "C"])
@@ -102,6 +106,8 @@ try:
         
         df_stats = pd.DataFrame(stats)
         obj_global = df_stats[df_stats['Tiempo'] > 0]['Tiempo'].mean()
+        
+        # Lógica de Semáforo: Rojo si > promedio, Verde si <= promedio
         df_stats['Color'] = df_stats['Tiempo'].apply(lambda x: '#ef553b' if x > obj_global else '#00cc96')
         
         fig = px.bar(df_stats, x='Etapa', y='Tiempo', color='Color', color_discrete_map="identity",
@@ -109,6 +115,7 @@ try:
         fig.add_hline(y=obj_global, line_dash="dash", line_color="black")
         st.plotly_chart(fig, use_container_width=True)
 
+    # --- SUBMENÚ: PRODUCTIVIDAD ---
     elif opcion == "👨‍🔧 Productividad de Operarios":
         st.title("👨‍🔧 Ranking de Productividad")
         etapa_sel = st.selectbox("Etapa a Auditar:", ["Pintado", "Chapa", "Desarme", "Armado", "Pulido"])
@@ -125,11 +132,10 @@ try:
             
             st.divider()
             st.subheader(f"🚗 Patentes con demora crítica en {etapa_sel}")
+            # Mostrar patentes con demoras por encima del promedio
             lentos = df[mask_etapa & (df['Dif (2)'] > avg_ref)].sort_values(by='Dif (2)', ascending=False)
             lentos['Duración'] = lentos['Dif (2)'].apply(format_hours)
             st.dataframe(lentos[['Patente', 'Operario', 'Duración']], use_container_width=True)
-        else:
-            st.info("No se encontraron registros.")
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Error en la aplicación: {e}")
