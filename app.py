@@ -1,84 +1,55 @@
 import streamlit as st
 import pandas as pd
 
-# ---------------- CONFIGURACION ----------------
+# Configuración de la página
+st.set_page_config(page_title="Análisis de Tiempos Taller CENOA Jujuy", layout="wide")
 
-st.set_page_config(page_title="Portal Taller CENOA", layout="wide")
-
-st.title("Portal Taller CENOA")
-st.subheader("Análisis de Tiempo - Daño C")
-
-# ---------------- CARGA DE DATOS ----------------
-
-SHEET_ID = "1bNgFg5s-1qZuToCInLqCJr4FAUK51m7lrClilBZojb8"
-
-# ⚠️ REEMPLAZAR POR EL GID REAL DE LA HOJA "Tipo de Daños (A,B,C)"
-GID = "99557603"
-
-url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}"
-
+# Función para cargar datos (ajustar la conexión a tu Google Sheet)
 @st.cache_data
-def cargar_datos():
-    return pd.read_csv(url)
+def load_data():
+    # Sustituir por la lógica de conexión a tu Drive/Excel
+    # df = pd.read_excel("tu_archivo.xlsx", sheet_name="Tipo de Daños (A,B,C)")
+    return pd.DataFrame() # Placeholder
 
-try:
-    df = cargar_datos()
-except:
-    st.error("Error al cargar la hoja. Verificar permisos o GID.")
-    st.stop()
+st.title("📊 Análisis de Tiempos por Tipo de Daño")
 
-# ---------------- FILTRAR DAÑO C ----------------
-
-df_c = df[df["Tipo de Daño"] == "C"].copy()
-
-if df_c.empty:
-    st.warning("No hay registros con Daño C")
-    st.stop()
-
-# Convertir tiempo a numérico
-df_c["Dif (2)"] = pd.to_numeric(df_c["Dif (2)"], errors="coerce")
-
-# ---------------- KPI PRINCIPALES ----------------
-
-st.markdown("### Indicadores Generales")
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Cantidad Registros Daño C", len(df_c))
-col2.metric("Promedio General (Horas)", round(df_c["Dif (2)"].mean(), 2))
-col3.metric("Total Horas Acumuladas", round(df_c["Dif (2)"].sum(), 2))
-
-# ---------------- ANALISIS POR ETAPA ----------------
-
-st.markdown("### Promedio de Horas por Etapa")
-
-resumen_etapas = (
-    df_c
-    .groupby("Etapas")["Dif (2)"]
-    .mean()
-    .reset_index()
-    .sort_values(by="Dif (2)", ascending=False)
+# 1. Menú de Selección de Tipo de Daño
+tipo_dano = st.selectbox(
+    "Seleccione el Tipo de Daño para analizar:",
+    ["A", "B", "C"],
+    index=0
 )
 
-st.dataframe(resumen_etapas, use_container_width=True)
-st.bar_chart(resumen_etapas.set_index("Etapas"))
+# Definición del Flujograma (Orden Operacional)
+flujograma = [
+    "Recepcion", "desarme", "chapa", "preparado", "aplicacion de primer",
+    "colorimetria", "pintado", "armado", "pulido", "lavado", 
+    "control de calidad", "entrega"
+]
 
-# ---------------- ANALISIS POR PATENTE ----------------
+# Filtrado de datos (Simulado según tu estructura)
+# df_filtrado = df[df['Tipo de Daño'] == tipo_dano]
 
-st.markdown("### Tiempo Total por Vehículo (Patente)")
+st.subheader(f"Flujo de Operación - Daño Tipo {tipo_dano}")
+st.info("Promedio de tiempo por etapa (Columna Dif (2))")
 
-resumen_patente = (
-    df_c
-    .groupby("Patente")["Dif (2)"]
-    .sum()
-    .reset_index()
-    .sort_values(by="Dif (2)", ascending=False)
-)
+# 2. Visualización del Flujograma con Métricas
+cols = st.columns(len(flujograma))
 
-st.dataframe(resumen_patente, use_container_width=True)
-st.bar_chart(resumen_patente.set_index("Patente"))
+for i, etapa in enumerate(flujograma):
+    with cols[i]:
+        # Lógica de cálculo:
+        # promedio = df_filtrado[df_filtrado['Etapas'] == etapa]['Dif (2)'].mean()
+        promedio_dummy = 0.0 # Reemplazar con el cálculo real del DF
+        
+        # Estética de tarjeta para el flujograma
+        st.metric(label=etapa.capitalize(), value=f"{promedio_dummy:.2f} h")
+        
+        # Flecha indicadora entre etapas (excepto la última)
+        if i < len(flujograma) - 1:
+            st.write("➡️")
 
-# ---------------- DETALLE ----------------
-
-st.markdown("### Detalle Completo - Daño C")
-st.dataframe(df_c[["Patente", "Etapas", "Dif (2)"]], use_container_width=True)
+# 3. Gráfico Comparativo Rápido
+st.divider()
+st.subheader("Comparativa Visual de Etapas")
+# Aquí podrías agregar un st.bar_chart con los promedios calculados
