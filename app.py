@@ -3,9 +3,21 @@ import pandas as pd
 import io
 import requests
 
-st.set_page_config(page_title="Autolux - Análisis Técnico", layout="wide")
+st.set_page_config(page_title="Autolux - Análisis de Tiempos", layout="wide")
 
 st.title("🛠️ Análisis de Tiempos Técnicos por Daño")
+
+# Función para convertir decimal a formato H:M
+def format_hours(decimal_hours):
+    if pd.isna(decimal_hours) or decimal_hours <= 0:
+        return "0h 00m"
+    hours = int(decimal_hours)
+    minutes = int(round((decimal_hours - hours) * 60))
+    # Ajuste por si el redondeo de minutos llega a 60
+    if minutes == 60:
+        hours += 1
+        minutes = 0
+    return f"{hours}h {minutes:02d}m"
 
 @st.cache_data
 def load_data():
@@ -17,18 +29,17 @@ def load_data():
 try:
     df = load_data()
 
-    # 1. Limpieza y Filtros Solicitados
+    # 1. Limpieza y Filtros
     df['Dif (2)'] = pd.to_numeric(df['Dif (2)'], errors='coerce').fillna(0)
     df['Etapas'] = df['Etapas'].astype(str).str.strip()
     df['Operario'] = df['Operario'].astype(str).str.upper()
 
-    # Excluir Operarios específicos
+    # Excluir Operarios (Basado en historial de Autolux)
     excluir_ops = ["ANDREA MARTINS", "JAVIER GUTIERREZ", "SAMUEL ANTUNEZ"]
     df = df[~df['Operario'].isin(excluir_ops)]
 
     # Excluir Etapas administrativas
     excluir_etapas = ["Recepcion", "Control de calidad", "Entrega"]
-    # Filtramos si la etapa contiene alguna de estas palabras
     for e in excluir_etapas:
         df = df[~df['Etapas'].str.contains(e, case=False, na=False)]
 
@@ -36,42 +47,38 @@ try:
     tipo_dano = st.selectbox("Seleccione el Tipo de Daño:", ["A", "B", "C"])
     df_filtrado = df[df['Tipo de Daño'].astype(str).str.contains(tipo_dano, na=False)]
 
-    # 3. Lógica de Agrupación por Palabras Clave
-    # Definimos los núcleos del proceso técnico
+    # 3. Flujograma Técnico con conversión a Horas/Minutos
     keywords = [
         "desarme", "chapa", "preparado", "primer", 
         "colorimetria", "pintado", "armado", "pulido", "lavado"
     ]
 
     st.subheader(f"Promedios del Proceso Técnico - Daño {tipo_dano}")
-    
-    # Creamos columnas para el flujo
     cols = st.columns(len(keywords))
 
     for i, key in enumerate(keywords):
         with cols[i]:
-            # Buscamos cualquier fila que incluya la palabra clave (ej: "preparado de chapa")
             mask = df_filtrado['Etapas'].str.contains(key, case=False, na=False)
-            data_etapa = df_filtrado.loc[mask]
-            promedio = data_etapa['Dif (2)'].mean()
+            promedio_decimal = df_filtrado.loc[mask, 'Dif (2)'].mean()
             
             label = key.capitalize()
-            val = f"{promedio:.2f} h" if pd.notnull(promedio) and promedio > 0 else "0.00 h"
+            # Aplicamos la nueva función de formato
+            tiempo_formateado = format_hours(promedio_decimal)
             
-            st.metric(label=label, value=val)
+            st.metric(label=label, value=tiempo_formateado)
             if i < len(keywords) - 1: st.write("➡️")
 
-    # 4. Análisis Detallado de TODAS las variantes encontradas
+    # 4. Tabla Detallada con ambas visualizaciones
     st.divider()
-    st.subheader("Desglose detallado por Variantes de Etapas")
-    st.write("A continuación se muestran todas las descripciones encontradas en el Excel y sus tiempos:")
+    st.subheader("Desglose de Variantes de Etapas")
     
-    # Agrupamos por el nombre exacto que aparece en el Excel
-    tabla_detallada = df_filtrado.groupby('Etapas')['Dif (2)'].agg(['mean', 'count']).rename(
-        columns={'mean': 'Tiempo Promedio (h)', 'count': 'Frecuencia (Autos)'}
-    ).sort_values(by='Tiempo Promedio (h)', ascending=False)
+    tabla_detallada = df_filtrado.groupby('Etapas')['Dif (2)'].agg(['mean', 'count']).reset_index()
+    tabla_detallada.columns = ['Etapa detectada en Excel', 'Promedio Decimal', 'Cantidad Autos']
     
-    st.dataframe(tabla_detallada, use_container_width=True)
+    # Añadimos la columna de tiempo amigable a la tabla
+    tabla_detallada['Tiempo (H:M)'] = tabla_detallada['Promedio Decimal'].apply(format_hours)
+    
+    st.dataframe(tabla_detallada[['Etapa detectada en Excel', 'Tiempo (H:M)', 'Cantidad Autos']], use_container_width=True)
 
 except Exception as e:
     st.error(f"Error: {e}")
