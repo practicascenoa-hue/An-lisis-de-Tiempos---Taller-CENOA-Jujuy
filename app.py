@@ -44,13 +44,10 @@ def load_data():
             cols = [c for c in df.columns if 'daño' in c.lower() or 'dano' in c.lower()]
             if cols: df.rename(columns={cols[0]: 'Tipo de Daño'}, inplace=True)
             
-        # =========================================================================
         # NUEVO MOTOR DE CÁLCULO DE HORAS (Ignora fechas y fines de semana del Excel)
-        # =========================================================================
         def parse_time(val):
             val = str(val).strip().upper()
             if val in ['', 'NAN', 'NAT', 'NULL', 'NONE']: return None
-            # Si Excel exportó "2026-01-05 17:00:00", esto corta la fecha y se queda solo con "17:00:00"
             if ' ' in val: 
                 val = val.split(' ')[-1]
             try:
@@ -66,19 +63,14 @@ def load_data():
             sa = parse_time(row.get('Salid (2)'))
             if en is not None and sa is not None:
                 d = sa - en
-                return d + 24.0 if d < 0 else d # Si cruza la medianoche (ej 22:00 a 02:00), suma 24 para dar 4h reales.
-            
-            # Fallback de seguridad: Si no anotaron Entrada/Salida, intenta usar el Dif(2) original del Excel
+                return d + 24.0 if d < 0 else d
             try:
                 val = str(row.get('Dif (2)', 0)).replace(',', '.')
                 return float(val) if pd.notna(float(val)) else 0.0
             except:
                 return 0.0
 
-        # Sobrescribimos la columna Dif (2) con nuestro cálculo puro
         df['Dif (2)'] = df.apply(calc_diff, axis=1)
-        # =========================================================================
-
         df['PAÑOS'] = pd.to_numeric(df['PAÑOS'], errors='coerce')
         df['Operario'] = df['Operario'].astype(str).str.upper().str.strip()
         df['Etapas'] = df['Etapas'].astype(str).str.upper().str.strip()
@@ -173,179 +165,117 @@ try:
             df_final = df[(df['Tipo Limpio'] == tipo) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
 
             if not df_final.empty:
-                resumen_bloques = df_final.groupby('Bloque')['Dif (2)'].mean().reset_index()
-                resumen_bloques['Orden'] = resumen_bloques['Bloque'].str.extract(r'(\d+)').astype(int)
-                resumen_bloques = resumen_bloques.sort_values('Orden')
-                resumen_bloques['Tiempo (H:M)'] = resumen_bloques['Dif (2)'].apply(format_hours)
-
-                st.subheader(f"Promedio de Tiempos - DAÑO {tipo}")
-                
-                fig = px.bar(
-                    resumen_bloques, 
-                    x='Bloque', 
-                    y='Dif (2)', 
-                    text='Tiempo (H:M)',
-                    title=f"Duración Promedio por Bloque de Trabajo ({mes_sel})",
-                    labels={'Dif (2)': 'Horas (Decimal)', 'Bloque': 'Fases del Taller'},
-                    color_discrete_sequence=['#002366']
-                )
-                fig.update_traces(textposition='outside')
-                fig.update_layout(yaxis_title="Promedio en Horas", xaxis_title="")
-                st.plotly_chart(fig, use_container_width=True)
-
+                # --------------------------------------------------------------------------------
+                # LÍNEA DE VIDA Y TIEMPO MUERTO (ALINEADO AL MÁXIMO)
+                # --------------------------------------------------------------------------------
                 st.divider()
+                st.subheader(f"🚗 Flujograma de Tiempos por Vehículo - DAÑO {tipo}")
+                st.write("La barra a color indica el **tiempo real trabajado**. La barra gris (Tiempo Muerto) completa el espacio hasta igualar el tiempo del vehículo que más demoró en ese bloque, alineando así el inicio de la siguiente etapa para todos los vehículos.")
 
-                st.subheader(f"Detalle de Actividades - DAÑO {tipo}")
-                st.write("Tiempo promedio de cada tarea individual que compone los bloques superiores")
-                
-                resumen_detallado = df_final.groupby(['Bloque', 'Etapas'])['Dif (2)'].mean().reset_index()
-                resumen_detallado['Orden'] = resumen_detallado['Bloque'].str.extract(r'(\d+)').astype(int)
-                resumen_detallado = resumen_detallado.sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
-                resumen_detallado['Tiempo Promedio'] = resumen_detallado['Dif (2)'].apply(format_hours)
-                
-                tabla_mostrar = resumen_detallado[['Bloque', 'Etapas', 'Tiempo Promedio']].rename(columns={'Etapas': 'Actividad Específica'})
-                st.dataframe(tabla_mostrar, use_container_width=True, hide_index=True)
+                df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '')].copy()
 
-            else:
-                st.warning(f"No hay registros del Daño {tipo} clasificados en las fases estándar operativas.")
+                if not df_vehiculos.empty:
+                    agrupado = df_vehiculos.groupby(['Patente', 'Bloque'])['Dif (2)'].sum().reset_index()
+                    agrupado.rename(columns={'Dif (2)': 'Trabajo_Real'}, inplace=True)
 
-            # --- COMPARATIVA DE BLOQUES ---
-            st.divider()
-            st.subheader("📊 Comparativa de Tiempos por Bloque (Daño A vs B vs C)")
-            st.write("Nota: Esta gráfica compara el tiempo promedio de cada bloque principal independientemente de las actividades internas que las componen")
+                    max_por_bloque = agrupado.groupby('Bloque')['Trabajo_Real'].max().reset_index()
+                    max_por_bloque.rename(columns={'Trabajo_Real': 'Max_Bloque'}, inplace=True)
 
-            df_comp = df[(df['Tipo Limpio'].isin(['A', 'B', 'C'])) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
+                    agrupado = agrupado.merge(max_por_bloque, on='Bloque')
+                    agrupado['Tiempo_Muerto'] = agrupado['Max_Bloque'] - agrupado['Trabajo_Real']
+                    agrupado['Tiempo_Muerto'] = agrupado['Tiempo_Muerto'].apply(lambda x: x if x > 0.01 else 0)
 
-            if not df_comp.empty:
-                resumen_comp = df_comp.groupby(['Bloque', 'Tipo Limpio'])['Dif (2)'].mean().reset_index()
-                resumen_comp['Orden'] = resumen_comp['Bloque'].str.extract(r'(\d+)').astype(int)
-                resumen_comp = resumen_comp.sort_values(['Orden', 'Tipo Limpio'])
-                resumen_comp['Tiempo (H:M)'] = resumen_comp['Dif (2)'].apply(format_hours)
+                    orden_bloques = sorted(agrupado['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
 
-                fig_comp = px.bar(
-                    resumen_comp,
-                    x='Bloque',
-                    y='Dif (2)',
-                    color='Tipo Limpio',
-                    barmode='group',
-                    text='Tiempo (H:M)',
-                    title=f"Comparativa General de Bloques - Mes: {mes_sel}",
-                    labels={'Dif (2)': 'Promedio en Horas', 'Bloque': 'Fases del Taller', 'Tipo Limpio': 'Tipo de Daño'},
-                    color_discrete_map={'A': '#00cc96', 'B': '#ff9900', 'C': '#ef553b'}
-                )
-                
-                fig_comp.update_traces(textposition='outside', textfont_size=10)
-                fig_comp.update_layout(yaxis_title="Horas Promedio", xaxis_title="", legend_title="Daño")
-                st.plotly_chart(fig_comp, use_container_width=True)
+                    base_dict = {}
+                    current_base = 0
+                    tick_vals = []
+                    tick_texts = []
 
-            # --------------------------------------------------------------------------------
-            # LÍNEA DE VIDA Y TIEMPO MUERTO (ALINEADO AL MÁXIMO)
-            # --------------------------------------------------------------------------------
-            st.divider()
-            st.subheader(f"🚗 Flujograma de Tiempos por Vehículo - DAÑO {tipo}")
-            st.write("La barra a color indica el **tiempo real trabajado**. La barra gris (Tiempo Muerto) completa el espacio hasta igualar el tiempo del vehículo que más demoró en ese bloque, alineando así el inicio de la siguiente etapa para todos los vehículos.")
+                    for b in orden_bloques:
+                        base_dict[b] = current_base
+                        tick_vals.append(current_base)
+                        tick_texts.append(b.split('. ')[-1])
+                        max_dur = max_por_bloque[max_por_bloque['Bloque'] == b]['Max_Bloque'].values[0]
+                        current_base += (max_dur + 0.5) 
 
-            df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '')].copy()
-
-            if not df_vehiculos.empty:
-                agrupado = df_vehiculos.groupby(['Patente', 'Bloque'])['Dif (2)'].sum().reset_index()
-                agrupado.rename(columns={'Dif (2)': 'Trabajo_Real'}, inplace=True)
-
-                max_por_bloque = agrupado.groupby('Bloque')['Trabajo_Real'].max().reset_index()
-                max_por_bloque.rename(columns={'Trabajo_Real': 'Max_Bloque'}, inplace=True)
-
-                agrupado = agrupado.merge(max_por_bloque, on='Bloque')
-                agrupado['Tiempo_Muerto'] = agrupado['Max_Bloque'] - agrupado['Trabajo_Real']
-                agrupado['Tiempo_Muerto'] = agrupado['Tiempo_Muerto'].apply(lambda x: x if x > 0.01 else 0)
-
-                orden_bloques = sorted(agrupado['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
-
-                base_dict = {}
-                current_base = 0
-                tick_vals = []
-                tick_texts = []
-
-                for b in orden_bloques:
-                    base_dict[b] = current_base
-                    tick_vals.append(current_base)
-                    tick_texts.append(b.split('. ')[-1])
-                    max_dur = max_por_bloque[max_por_bloque['Bloque'] == b]['Max_Bloque'].values[0]
-                    current_base += (max_dur + 0.5) 
-
-                plot_data = []
-                for idx, row in agrupado.iterrows():
-                    plot_data.append({
-                        'Patente': row['Patente'],
-                        'Bloque': row['Bloque'],
-                        'Tipo': row['Bloque'],
-                        'Duracion': row['Trabajo_Real'],
-                        'Base_Inicio': base_dict[row['Bloque']],
-                        'Orden': int(row['Bloque'].split('.')[0]),
-                        'Texto': format_hours(row['Trabajo_Real'])
-                    })
-                    if row['Tiempo_Muerto'] > 0:
+                    plot_data = []
+                    for idx, row in agrupado.iterrows():
                         plot_data.append({
                             'Patente': row['Patente'],
                             'Bloque': row['Bloque'],
-                            'Tipo': '⏳ Tiempo Muerto',
-                            'Duracion': row['Tiempo_Muerto'],
-                            'Base_Inicio': base_dict[row['Bloque']] + row['Trabajo_Real'],
-                            'Orden': int(row['Bloque'].split('.')[0]) + 0.5,
-                            'Texto': format_hours(row['Tiempo_Muerto']) + " (M)"
+                            'Tipo': row['Bloque'],
+                            'Duracion': row['Trabajo_Real'],
+                            'Base_Inicio': base_dict[row['Bloque']],
+                            'Orden': int(row['Bloque'].split('.')[0]),
+                            'Texto': format_hours(row['Trabajo_Real'])
                         })
+                        if row['Tiempo_Muerto'] > 0:
+                            plot_data.append({
+                                'Patente': row['Patente'],
+                                'Bloque': row['Bloque'],
+                                'Tipo': '⏳ Tiempo Muerto',
+                                'Duracion': row['Tiempo_Muerto'],
+                                'Base_Inicio': base_dict[row['Bloque']] + row['Trabajo_Real'],
+                                'Orden': int(row['Bloque'].split('.')[0]) + 0.5,
+                                'Texto': format_hours(row['Tiempo_Muerto']) + " (M)"
+                            })
 
-                df_plot = pd.DataFrame(plot_data)
-                df_plot = df_plot.sort_values(['Patente', 'Orden'])
+                    df_plot = pd.DataFrame(plot_data)
+                    df_plot = df_plot.sort_values(['Patente', 'Orden'])
 
-                orden_patentes = agrupado.groupby('Patente')['Trabajo_Real'].sum().sort_values(ascending=True).index
+                    orden_patentes = agrupado.groupby('Patente')['Trabajo_Real'].sum().sort_values(ascending=True).index
 
-                color_map = {'⏳ Tiempo Muerto': '#e0e0e0'} 
-                colores_base = px.colors.qualitative.Plotly
-                for i, b in enumerate(orden_bloques):
-                    color_map[b] = colores_base[i % len(colores_base)]
+                    color_map = {'⏳ Tiempo Muerto': '#e0e0e0'} 
+                    colores_base = px.colors.qualitative.Plotly
+                    for i, b in enumerate(orden_bloques):
+                        color_map[b] = colores_base[i % len(colores_base)]
 
-                fig_vehiculos = px.bar(
-                    df_plot,
-                    x='Duracion',
-                    y='Patente',
-                    base='Base_Inicio',
-                    color='Tipo',
-                    orientation='h',
-                    text='Texto', 
-                    title=f"Línea de Vida Alineada y Tiempo Muerto (Daño {tipo})",
-                    labels={'Duracion': 'Horas', 'Patente': 'Patente'},
-                    hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden': False, 'Tipo': False},
-                    category_orders={'Patente': orden_patentes},
-                    color_discrete_map=color_map
-                )
-
-                fig_vehiculos.update_layout(
-                    height=max(400, len(orden_patentes) * 35),
-                    showlegend=True,
-                    legend_title="Actividad / Demora",
-                    xaxis=dict(
-                        tickmode='array',
-                        tickvals=tick_vals,
-                        ticktext=tick_texts, 
-                        title="",
-                        gridcolor='rgba(200, 200, 200, 0.2)'
-                    ),
-                    yaxis=dict(
-                        title="",
-                        showgrid=True, # LÍNEAS HORIZONTALES POR VEHÍCULO
-                        gridcolor='rgba(150, 150, 150, 0.4)',
-                        gridwidth=1,
-                        griddash='dot'
+                    fig_vehiculos = px.bar(
+                        df_plot,
+                        x='Duracion',
+                        y='Patente',
+                        base='Base_Inicio',
+                        color='Tipo',
+                        orientation='h',
+                        text='Texto', 
+                        title=f"Línea de Vida Alineada y Tiempo Muerto (Daño {tipo})",
+                        labels={'Duracion': 'Horas', 'Patente': 'Patente'},
+                        hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden': False, 'Tipo': False},
+                        category_orders={'Patente': orden_patentes},
+                        color_discrete_map=color_map
                     )
-                )
 
-                for val in tick_vals:
-                    fig_vehiculos.add_vline(x=val, line_dash="dot", line_color="gray", opacity=0.7)
+                    fig_vehiculos.update_layout(
+                        height=max(400, len(orden_patentes) * 35),
+                        showlegend=True,
+                        legend_title="Actividad / Demora",
+                        xaxis=dict(
+                            tickmode='array',
+                            tickvals=tick_vals,
+                            ticktext=tick_texts, 
+                            title="",
+                            gridcolor='rgba(200, 200, 200, 0.2)'
+                        ),
+                        yaxis=dict(
+                            title="",
+                            showgrid=True, # LÍNEAS HORIZONTALES POR VEHÍCULO
+                            gridcolor='rgba(150, 150, 150, 0.4)',
+                            gridwidth=1,
+                            griddash='dot'
+                        )
+                    )
 
-                fig_vehiculos.update_traces(textposition='auto', textfont_size=11)
-                st.plotly_chart(fig_vehiculos, use_container_width=True)
+                    for val in tick_vals:
+                        fig_vehiculos.add_vline(x=val, line_dash="dot", line_color="gray", opacity=0.7)
+
+                    fig_vehiculos.update_traces(textposition='auto', textfont_size=11)
+                    st.plotly_chart(fig_vehiculos, use_container_width=True)
+                else:
+                    st.warning(f"No hay registros de patentes válidas para graficar el flujograma del Daño {tipo}.")
+
             else:
-                st.warning(f"No hay registros de patentes válidas para graficar el flujograma del Daño {tipo}.")
+                st.warning(f"No hay registros del Daño {tipo} clasificados en las fases estándar operativas.")
 
         else:
             st.info(f"No hay datos cargados para {mes_sel}.")
