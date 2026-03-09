@@ -28,20 +28,6 @@ def format_hours(decimal_hours):
     if minutes == 60: hours += 1; minutes = 0
     return f"{hours}h {minutes:02d}m"
 
-def to_decimal_hours(val):
-    try:
-        if pd.isna(val) or val == '' or str(val).upper() == 'NAN': return 0.0
-        val_str = str(val).strip()
-        if ':' in val_str:
-            parts = val_str.split(':')
-            h = float(parts[0])
-            m = float(parts[1])
-            return h + m/60.0
-        else:
-            return float(val_str)
-    except:
-        return 0.0
-
 @st.cache_data(ttl=60)
 def load_data():
     sheet_id = "1bNgFg5s-1qZuToCInLqCJr4FAUK51m7lrClilBZojb8"
@@ -64,8 +50,6 @@ def load_data():
         df['Etapas'] = df['Etapas'].astype(str).str.upper().str.strip()
         df['Tipo de Daño'] = df['Tipo de Daño'].astype(str).str.upper().str.strip()
         df['Patente'] = df['Patente'].astype(str).str.upper().str.strip() 
-        df['Entra (2)'] = df['Entra (2)'].astype(str)
-        df['Salid (2)'] = df['Salid (2)'].astype(str)
         
         return df
     except Exception:
@@ -215,44 +199,34 @@ try:
                     labels={'Dif (2)': 'Promedio en Horas', 'Bloque': 'Fases del Taller', 'Tipo Limpio': 'Tipo de Daño'},
                     color_discrete_map={'A': '#00cc96', 'B': '#ff9900', 'C': '#ef553b'}
                 )
+                
                 fig_comp.update_traces(textposition='outside', textfont_size=10)
                 fig_comp.update_layout(yaxis_title="Horas Promedio", xaxis_title="", legend_title="Daño")
                 st.plotly_chart(fig_comp, use_container_width=True)
 
             # --------------------------------------------------------------------------------
-            # NUEVA SECCIÓN: LÍNEA DE VIDA Y TIEMPO MUERTO
+            # NUEVA SECCIÓN: LÍNEA DE VIDA Y TIEMPO MUERTO (ALINEADO AL MÁXIMO)
             # --------------------------------------------------------------------------------
             st.divider()
             st.subheader(f"🚗 Flujograma de Tiempos por Vehículo - DAÑO {tipo}")
-            st.write("La barra a color indica el **tiempo real trabajado**, mientras que la barra gris indica el **tiempo muerto** (baches sin trabajar dentro de la misma fase).")
+            st.write("La barra a color indica el **tiempo real trabajado**. La barra gris (Tiempo Muerto) completa el espacio hasta igualar el tiempo del vehículo que más demoró en ese bloque, alineando así el inicio de la siguiente etapa para todos los vehículos.")
 
             df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '')].copy()
 
             if not df_vehiculos.empty:
-                # Calculamos horas decimales para Entrada y Salida
-                df_vehiculos['Entra_Dec'] = df_vehiculos['Entra (2)'].apply(to_decimal_hours)
-                df_vehiculos['Salid_Dec'] = df_vehiculos['Salid (2)'].apply(to_decimal_hours)
+                # 1. Agrupamos por vehículo y bloque sumando el tiempo real
+                agrupado = df_vehiculos.groupby(['Patente', 'Bloque'])['Dif (2)'].sum().reset_index()
+                agrupado.rename(columns={'Dif (2)': 'Trabajo_Real'}, inplace=True)
 
-                # Agrupamos por vehículo y bloque para encontrar el tiempo total trabajado vs el lapso transcurrido
-                agrupado = df_vehiculos.groupby(['Patente', 'Bloque']).agg(
-                    Trabajo_Real=('Dif (2)', 'sum'),
-                    Min_Entra=('Entra_Dec', 'min'),
-                    Max_Salid=('Salid_Dec', 'max')
-                ).reset_index()
+                # 2. Encontramos el tiempo máximo por cada bloque
+                max_por_bloque = agrupado.groupby('Bloque')['Trabajo_Real'].max().reset_index()
+                max_por_bloque.rename(columns={'Trabajo_Real': 'Max_Bloque'}, inplace=True)
 
-                # Función para calcular el Span Real (Lapso transcurrido)
-                def calc_span(row):
-                    if row['Min_Entra'] == 0 and row['Max_Salid'] == 0:
-                        return row['Trabajo_Real']
-                    span = row['Max_Salid'] - row['Min_Entra']
-                    if span < 0: span += 24 # Si el auto pasó de un día para el otro
-                    return max(span, row['Trabajo_Real']) # El Span nunca puede ser menor que el trabajo real
-
-                agrupado['Span_Total'] = agrupado.apply(calc_span, axis=1)
-                
-                # Tiempo muerto es el lapso transcurrido menos las horas realmente trabajadas
-                agrupado['Tiempo_Muerto'] = agrupado['Span_Total'] - agrupado['Trabajo_Real']
-                agrupado['Tiempo_Muerto'] = agrupado['Tiempo_Muerto'].apply(lambda x: x if x > 0.05 else 0) # Ignorar baches de menos de 3 minutos
+                # 3. Unimos y calculamos el tiempo muerto (Diferencia contra el máximo del bloque)
+                agrupado = agrupado.merge(max_por_bloque, on='Bloque')
+                agrupado['Tiempo_Muerto'] = agrupado['Max_Bloque'] - agrupado['Trabajo_Real']
+                # Filtramos para ignorar diferencias minúsculas de segundos por redondeo
+                agrupado['Tiempo_Muerto'] = agrupado['Tiempo_Muerto'].apply(lambda x: x if x > 0.01 else 0)
 
                 orden_bloques = sorted(agrupado['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
 
@@ -266,13 +240,14 @@ try:
                     base_dict[b] = current_base
                     tick_vals.append(current_base)
                     tick_texts.append(b.split('. ')[-1])
-                    max_dur = agrupado[agrupado['Bloque'] == b]['Span_Total'].max()
-                    current_base += (max_dur + 1.5) # Dejamos un espacio visual entre bloques
+                    # El siguiente bloque comenzará después del máximo de este bloque + 0.5h margen visual
+                    max_dur = max_por_bloque[max_por_bloque['Bloque'] == b]['Max_Bloque'].values[0]
+                    current_base += (max_dur + 0.5) 
 
                 # Construir DataFrame final para el gráfico apilado
                 plot_data = []
                 for idx, row in agrupado.iterrows():
-                    # 1. Tramo de Trabajo Efectivo (Barra a color)
+                    # Tramo 1: Trabajo Efectivo (Barra a color)
                     plot_data.append({
                         'Patente': row['Patente'],
                         'Bloque': row['Bloque'],
@@ -280,10 +255,9 @@ try:
                         'Duracion': row['Trabajo_Real'],
                         'Base_Inicio': base_dict[row['Bloque']],
                         'Orden': int(row['Bloque'].split('.')[0]),
-                        'Texto': format_hours(row['Trabajo_Real']),
-                        'Total_Span': row['Span_Total']
+                        'Texto': format_hours(row['Trabajo_Real'])
                     })
-                    # 2. Tramo de Tiempo Muerto (Barra Gris pegada a la anterior)
+                    # Tramo 2: Tiempo Muerto (Barra Gris pegada a la anterior)
                     if row['Tiempo_Muerto'] > 0:
                         plot_data.append({
                             'Patente': row['Patente'],
@@ -291,16 +265,15 @@ try:
                             'Tipo': '⏳ Tiempo Muerto',
                             'Duracion': row['Tiempo_Muerto'],
                             'Base_Inicio': base_dict[row['Bloque']] + row['Trabajo_Real'],
-                            'Orden': int(row['Bloque'].split('.')[0]) + 0.5,
-                            'Texto': format_hours(row['Tiempo_Muerto']) + " (M)",
-                            'Total_Span': row['Span_Total']
+                            'Orden': int(row['Bloque'].split('.')[0]) + 0.5, # Para que se apile después del color
+                            'Texto': format_hours(row['Tiempo_Muerto']) + " (M)"
                         })
 
                 df_plot = pd.DataFrame(plot_data)
                 df_plot = df_plot.sort_values(['Patente', 'Orden'])
 
-                # Ordenar autos por tiempo TOTAL (Los autos que más tardaron quedan arriba)
-                orden_patentes = agrupado.groupby('Patente')['Span_Total'].sum().sort_values(ascending=True).index
+                # Ordenar autos por tiempo TOTAL real trabajado para el eje Y
+                orden_patentes = agrupado.groupby('Patente')['Trabajo_Real'].sum().sort_values(ascending=True).index
 
                 # Paleta de Colores
                 color_map = {'⏳ Tiempo Muerto': '#e0e0e0'} # Gris claro para tiempo muerto
@@ -308,6 +281,7 @@ try:
                 for i, b in enumerate(orden_bloques):
                     color_map[b] = colores_base[i % len(colores_base)]
 
+                # Gráfico final
                 fig_vehiculos = px.bar(
                     df_plot,
                     x='Duracion',
@@ -315,10 +289,10 @@ try:
                     base='Base_Inicio',
                     color='Tipo',
                     orientation='h',
-                    text='Texto', # Esto muestra el tiempo escrito SOBRE la barra
-                    title=f"Línea de Vida y Análisis de Tiempo Muerto (Daño {tipo})",
+                    text='Texto', # Muestra el texto directamente sobre la barra
+                    title=f"Línea de Vida Alineada y Tiempo Muerto (Daño {tipo})",
                     labels={'Duracion': 'Horas', 'Patente': 'Patente'},
-                    hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden': False, 'Tipo': False, 'Total_Span': False},
+                    hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden': False, 'Tipo': False},
                     category_orders={'Patente': orden_patentes},
                     color_discrete_map=color_map
                 )
@@ -343,12 +317,12 @@ try:
                     )
                 )
 
-                # Líneas verticales guía para inicio de bloques
+                # Líneas verticales guía para inicio exacto de bloques
                 for val in tick_vals:
                     fig_vehiculos.add_vline(x=val, line_dash="dot", line_color="gray", opacity=0.7)
 
-                # Configuración de los textos dentro de la barra
-                fig_vehiculos.update_traces(textposition='inside', textfont_size=11)
+                # Configuración para que los textos siempre se lean bien dentro o fuera de la barra
+                fig_vehiculos.update_traces(textposition='auto', textfont_size=11)
                 
                 st.plotly_chart(fig_vehiculos, use_container_width=True)
             else:
