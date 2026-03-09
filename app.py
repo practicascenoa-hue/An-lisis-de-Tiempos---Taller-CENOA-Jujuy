@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import requests
-import plotly.figure_factory as ff
-from datetime import datetime, timedelta
+import plotly.express as px
 
 # 1. CONFIGURACIÓN DE PÁGINA MODO PRO
 st.set_page_config(page_title="Taller CENOA Jujuy - Análisis Técnico", layout="wide", page_icon="📈")
@@ -29,10 +28,9 @@ def format_hours(decimal_hours):
     if minutes == 60: hours += 1; minutes = 0
     return f"{hours}h {minutes:02d}m"
 
-@st.cache_data(ttl=60) # Refresca el caché cada 60 segundos si hay cambios en el Excel
+@st.cache_data(ttl=60)
 def load_data():
     sheet_id = "1bNgFg5s-1qZuToCInLqCJr4FAUK51m7lrClilBZojb8"
-    # Codificación segura de la URL (el %C3%B1 representa la 'ñ')
     csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Tipo%20de%20Da%C3%B1os%20(A,B,C)"
     
     try:
@@ -41,10 +39,7 @@ def load_data():
         
         df = pd.read_csv(io.StringIO(response.text))
         
-        # MODO PRO: Auto-limpieza profunda para evitar errores de filtro
-        df.columns = df.columns.str.strip() # Quita espacios en los títulos de columnas
-        
-        # Validación de seguridad por si cambian el título en el Excel
+        df.columns = df.columns.str.strip()
         if 'Tipo de Daño' not in df.columns:
             cols = [c for c in df.columns if 'daño' in c.lower() or 'dano' in c.lower()]
             if cols: df.rename(columns={cols[0]: 'Tipo de Daño'}, inplace=True)
@@ -52,17 +47,17 @@ def load_data():
         df['Dif (2)'] = pd.to_numeric(df['Dif (2)'], errors='coerce').fillna(0)
         df['PAÑOS'] = pd.to_numeric(df['PAÑOS'], errors='coerce')
         df['Operario'] = df['Operario'].astype(str).str.upper().str.strip()
-        df['Etapas'] = df['Etapas'].astype(str).str.upper().str.strip() # Todo a mayúscula para coincidir perfecto
+        df['Etapas'] = df['Etapas'].astype(str).str.upper().str.strip()
         df['Tipo de Daño'] = df['Tipo de Daño'].astype(str).str.upper().str.strip()
         
         return df
     except Exception:
         return pd.DataFrame()
 
-# Mapeo de Actividades (Todas en mayúsculas por seguridad)
-MAPEO_GANTT = {
+# Mapeo actualizado de Bloques y Actividades
+MAPEO_BLOQUES = {
     "1. RECEPCIÓN": ["RECEPCION"],
-    "2. DESARME": ["DESARME", "DESARME Y CHAPA", "AYUDA DE DESARME DE CHAPA"],
+    "2. DESARME": ["DESARME", "DESARMADO", "DESARME Y CHAPA", "AYUDA DE DESARME DE CHAPA"],
     "3. CHAPA": ["CHAPA", "MASILLADO Y LIJADO"],
     "4. PREPARADO": ["PREPARADO", "PREPARADO PARAGOLPE", "PREPARADO PARAGOLPE DELANTERO", "PREPARADO CAPERUZA", "PREPARADO DE TAPA DE BAUL", "PREPARACION DE PARAGOLPE", "EMPAPELADO", "LIJADO", "LIJADO PRIMER"],
     "5. APLICACIÓN DE PRIMER": ["APLICACION DE PRIMER"],
@@ -75,16 +70,26 @@ MAPEO_GANTT = {
     "12. ENTREGA": ["TERMINACIONES", "LIMPIEZA"]
 }
 
+# Función para asignar el bloque a cada etapa
+def obtener_bloque(etapa):
+    for bloque, sub_etapas in MAPEO_BLOQUES.items():
+        if etapa in sub_etapas:
+            return bloque
+    return "OTRO / NO CLASIFICADO"
+
 # 3. PROCESAMIENTO PRINCIPAL
 try:
     df_raw = load_data()
     
     if df_raw.empty:
-        st.error("🚨 Error crítico: No se pudieron descargar los datos del Google Sheet. Verifica los permisos de acceso al enlace.")
+        st.error("🚨 Error crítico: No se pudieron descargar los datos. Verifica los permisos de acceso al enlace.")
         st.stop()
         
     excluir_ops = ["ANDREA MARTINS", "JAVIER GUTIERREZ", "SAMUEL ANTUNEZ"]
     df = df_raw[~df_raw['Operario'].isin(excluir_ops)].copy()
+    
+    # Asignar el bloque a cada fila
+    df['Bloque'] = df['Etapas'].apply(obtener_bloque)
 
     # 4. SIDEBAR
     with st.sidebar:
@@ -110,55 +115,66 @@ try:
             col_a, col_b, col_c = st.columns(3)
             if 'tipo_dano' not in st.session_state: st.session_state.tipo_dano = 'A'
             
-            # Botones de estado
             if col_a.button("DAÑO A"): st.session_state.tipo_dano = 'A'
             if col_b.button("DAÑO B"): st.session_state.tipo_dano = 'B'
             if col_c.button("DAÑO C"): st.session_state.tipo_dano = 'C'
             
             tipo = st.session_state.tipo_dano
             
-            # Filtro blindado
-            df_final = df[df['Tipo de Daño'].str.contains(tipo, na=False)]
-
-            # MODO DEPURACIÓN VISUAL (Para el administrador)
-            with st.expander("🛠️ Modo Depuración (Ver datos crudos encontrados)"):
-                st.write(f"Filas encontradas para Daño {tipo}: {len(df_final)}")
-                st.dataframe(df_final[['Ref.OR', 'Etapas', 'Tipo de Daño', 'Dif (2)']].head(10))
+            # Filtro por tipo de daño y quitar los no clasificados si lo deseas
+            df_final = df[(df['Tipo de Daño'].str.contains(tipo, na=False)) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
 
             if not df_final.empty:
-                gantt_data = []
-                base_date = datetime(2026, 1, 1, 8, 0)
+                # 1. Agrupación a nivel de BLOQUES
+                resumen_bloques = df_final.groupby('Bloque')['Dif (2)'].mean().reset_index()
+                # Ordenar cronológicamente (aprovechando el número en el nombre del bloque, ej: "1. RECEPCIÓN")
+                resumen_bloques['Orden'] = resumen_bloques['Bloque'].str.extract('(\d+)').astype(int)
+                resumen_bloques = resumen_bloques.sort_values('Orden')
                 
-                for idx, (label, sub_etapas) in enumerate(MAPEO_GANTT.items()):
-                    mask = df_final['Etapas'].isin(sub_etapas)
-                    promedio_h = df_final.loc[mask, 'Dif (2)'].mean()
-                    
-                    if pd.notnull(promedio_h) and promedio_h > 0:
-                        start_time = base_date
-                        end_time = start_time + timedelta(hours=promedio_h)
-                        gantt_data.append(dict(Task=label, Start=start_time, Finish=end_time, Resource=label))
-                        base_date = end_time
+                resumen_bloques['Tiempo (H:M)'] = resumen_bloques['Dif (2)'].apply(format_hours)
 
-                if gantt_data:
-                    st.subheader(f"Flujo de Reparación - DAÑO {tipo}")
-                    fig = ff.create_gantt(gantt_data, index_col='Resource', show_colorbar=True, group_tasks=True, showgrid_x=True)
-                    fig.update_layout(xaxis_type='date', xaxis=dict(tickformat="%H:%M"), height=450, showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    resumen_df = pd.DataFrame(gantt_data)
-                    resumen_df['Duración Promedio'] = resumen_df.apply(lambda x: format_hours((x['Finish'] - x['Start']).total_seconds()/3600), axis=1)
-                    st.dataframe(resumen_df[['Task', 'Duración Promedio']].rename(columns={'Task': 'Fase Técnica'}), use_container_width=True)
-                else:
-                    st.warning(f"Se encontraron registros de Daño {tipo}, pero las descripciones de 'Etapas' no coinciden con el mapeo del sistema.")
+                st.subheader(f"Promedio de Tiempos por Fase General - DAÑO {tipo}")
+                
+                fig = px.bar(
+                    resumen_bloques, 
+                    x='Bloque', 
+                    y='Dif (2)', 
+                    text='Tiempo (H:M)',
+                    title=f"Duración Promedio por Bloque de Trabajo ({mes_sel})",
+                    labels={'Dif (2)': 'Horas (Decimal)', 'Bloque': 'Fases del Taller'},
+                    color_discrete_sequence=['#002366']
+                )
+                fig.update_traces(textposition='outside')
+                fig.update_layout(yaxis_title="Promedio en Horas", xaxis_title="")
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.divider()
+
+                # 2. Agrupación a nivel de ETAPAS DETALLADAS
+                st.subheader(f"Desglose Detallado de Actividades - DAÑO {tipo}")
+                st.write("Visualiza el tiempo exacto de cada tarea individual que compone los bloques superiores.")
+                
+                resumen_detallado = df_final.groupby(['Bloque', 'Etapas'])['Dif (2)'].mean().reset_index()
+                
+                # Ordenar lógicamente por el bloque y luego de mayor a menor tiempo
+                resumen_detallado['Orden'] = resumen_detallado['Bloque'].str.extract('(\d+)').astype(int)
+                resumen_detallado = resumen_detallado.sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
+                
+                resumen_detallado['Tiempo Promedio'] = resumen_detallado['Dif (2)'].apply(format_hours)
+                
+                # Mostrar la tabla formateada limpiando columnas auxiliares
+                tabla_mostrar = resumen_detallado[['Bloque', 'Etapas', 'Tiempo Promedio']].rename(columns={'Etapas': 'Actividad Específica'})
+                st.dataframe(tabla_mostrar, use_container_width=True, hide_index=True)
+
             else:
-                st.warning(f"No hay registros del Daño {tipo} en la base de datos.")
+                st.warning(f"No hay registros del Daño {tipo} clasificados en las fases estándar.")
         else:
             st.info(f"No hay datos cargados para {mes_sel}.")
 
     elif opcion == "👨‍🔧 Productividad de Operarios":
         st.title("👨‍🔧 Ranking de Productividad")
-        etapa_sel = st.selectbox("Fase Técnica a Auditar:", list(MAPEO_GANTT.keys()))
-        sub_etapas = MAPEO_GANTT[etapa_sel]
+        etapa_sel = st.selectbox("Fase Técnica a Auditar:", list(MAPEO_BLOQUES.keys()))
+        sub_etapas = MAPEO_BLOQUES[etapa_sel]
         
         mask_etapa = df['Etapas'].isin(sub_etapas)
         df_op = df[mask_etapa].groupby('Operario')['Dif (2)'].mean().reset_index()
