@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import requests
 
-st.set_page_config(page_title="Autolux - Análisis de Tiempos", layout="wide")
+st.set_page_config(page_title="Taller CENOA Jujuy - Análisis de Tiempos", layout="wide")
 
 st.title("🛠️ Análisis de Tiempos Técnicos por Daño")
 
