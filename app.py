@@ -75,6 +75,14 @@ def obtener_bloque(etapa):
             return bloque
     return "OTRO / NO CLASIFICADO"
 
+# Función para simplificar el tipo de daño (Asegura que sea solo A, B o C)
+def limpiar_dano(val):
+    val = str(val).upper()
+    if 'A' in val: return 'A'
+    if 'B' in val: return 'B'
+    if 'C' in val: return 'C'
+    return None
+
 # 3. PROCESAMIENTO PRINCIPAL
 try:
     df_raw = load_data()
@@ -86,8 +94,9 @@ try:
     excluir_ops = ["ANDREA MARTINS", "JAVIER GUTIERREZ", "SAMUEL ANTUNEZ"]
     df = df_raw[~df_raw['Operario'].isin(excluir_ops)].copy()
     
-    # Asignar el bloque a cada fila
+    # Asignar el bloque a cada fila y limpiar el daño
     df['Bloque'] = df['Etapas'].apply(obtener_bloque)
+    df['Tipo Limpio'] = df['Tipo de Daño'].apply(limpiar_dano)
 
     # 4. SIDEBAR
     with st.sidebar:
@@ -119,17 +128,14 @@ try:
             
             tipo = st.session_state.tipo_dano
             
-            # Filtro por tipo de daño y quitar los no clasificados (así no se ensucia el gráfico)
-            df_final = df[(df['Tipo de Daño'].str.contains(tipo, na=False)) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
+            # Filtro por tipo de daño y quitar los no clasificados
+            df_final = df[(df['Tipo Limpio'] == tipo) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
 
             if not df_final.empty:
                 # 1. Agrupación a nivel de BLOQUES
                 resumen_bloques = df_final.groupby('Bloque')['Dif (2)'].mean().reset_index()
-                
-                # Extraemos el número del bloque ("1. DESARME" -> 1) para ordenar cronológicamente
                 resumen_bloques['Orden'] = resumen_bloques['Bloque'].str.extract(r'(\d+)').astype(int)
                 resumen_bloques = resumen_bloques.sort_values('Orden')
-                
                 resumen_bloques['Tiempo (H:M)'] = resumen_bloques['Dif (2)'].apply(format_hours)
 
                 st.subheader(f"Promedio de Tiempos por Fase General - DAÑO {tipo}")
@@ -154,19 +160,55 @@ try:
                 st.write("Visualiza el tiempo exacto de cada tarea individual que compone los bloques superiores.")
                 
                 resumen_detallado = df_final.groupby(['Bloque', 'Etapas'])['Dif (2)'].mean().reset_index()
-                
-                # Ordenar lógicamente por el número de bloque y luego de mayor a menor tiempo
                 resumen_detallado['Orden'] = resumen_detallado['Bloque'].str.extract(r'(\d+)').astype(int)
                 resumen_detallado = resumen_detallado.sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
-                
                 resumen_detallado['Tiempo Promedio'] = resumen_detallado['Dif (2)'].apply(format_hours)
                 
-                # Mostrar la tabla formateada
                 tabla_mostrar = resumen_detallado[['Bloque', 'Etapas', 'Tiempo Promedio']].rename(columns={'Etapas': 'Actividad Específica'})
                 st.dataframe(tabla_mostrar, use_container_width=True, hide_index=True)
 
             else:
                 st.warning(f"No hay registros del Daño {tipo} clasificados en las fases estándar operativas.")
+
+            # --------------------------------------------------------------------------------
+            # NUEVA SECCIÓN: 3. COMPARATIVA GLOBAL DE DAÑOS A vs B vs C
+            # --------------------------------------------------------------------------------
+            st.divider()
+            st.subheader("📊 Comparativa de Tiempos por Bloque (Daño A vs B vs C)")
+            st.write("Esta gráfica compara el tiempo promedio de cada fase principal sin importar las actividades internas.")
+
+            # Filtramos todos los daños (A, B y C) excluyendo los no clasificados
+            df_comp = df[(df['Tipo Limpio'].isin(['A', 'B', 'C'])) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
+
+            if not df_comp.empty:
+                resumen_comp = df_comp.groupby(['Bloque', 'Tipo Limpio'])['Dif (2)'].mean().reset_index()
+                
+                # Orden lógico
+                resumen_comp['Orden'] = resumen_comp['Bloque'].str.extract(r'(\d+)').astype(int)
+                resumen_comp = resumen_comp.sort_values(['Orden', 'Tipo Limpio'])
+                resumen_comp['Tiempo (H:M)'] = resumen_comp['Dif (2)'].apply(format_hours)
+
+                # Gráfico de barras agrupadas (barmode='group')
+                fig_comp = px.bar(
+                    resumen_comp,
+                    x='Bloque',
+                    y='Dif (2)',
+                    color='Tipo Limpio',
+                    barmode='group',
+                    text='Tiempo (H:M)',
+                    title=f"Comparativa General de Bloques - Mes: {mes_sel}",
+                    labels={'Dif (2)': 'Promedio en Horas', 'Bloque': 'Fases del Taller', 'Tipo Limpio': 'Tipo de Daño'},
+                    color_discrete_map={'A': '#00cc96', 'B': '#ff9900', 'C': '#ef553b'}  # Verde, Naranja, Rojo
+                )
+                
+                # Ajustes visuales para que no se superpongan los textos
+                fig_comp.update_traces(textposition='outside', textfont_size=10)
+                fig_comp.update_layout(yaxis_title="Horas Promedio", xaxis_title="", legend_title="Daño")
+                
+                st.plotly_chart(fig_comp, use_container_width=True)
+            else:
+                st.warning("No hay datos suficientes para generar la comparativa global.")
+
         else:
             st.info(f"No hay datos cargados para {mes_sel}.")
 
