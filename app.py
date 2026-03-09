@@ -5,18 +5,23 @@ import requests
 import plotly.figure_factory as ff
 from datetime import datetime, timedelta
 
-# 1. CONFIGURACIÓN DE PÁGINA
-st.set_page_config(page_title="Taller CENOA Jujuy - Análisis de Tiempos", layout="wide")
+# 1. CONFIGURACIÓN DE PÁGINA MODO PRO
+st.set_page_config(page_title="Taller CENOA Jujuy - Análisis Técnico", layout="wide", page_icon="📈")
 
-# Estilo para botones y métricas
+# Estilo corporativo avanzado
 st.markdown("""
     <style>
-    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #dee2e6; }
-    div[data-testid="column"] > button { width: 100%; height: 50px; font-weight: bold; border: 2px solid #002366; color: #002366; }
+    .main { background-color: #f4f6f9; }
+    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #e1e4e8; box-shadow: 2px 2px 10px rgba(0,0,0,0.05); }
+    div[data-testid="column"] > button { width: 100%; height: 50px; font-weight: bold; border-radius: 8px; border: 2px solid #002366; color: #002366; transition: all 0.3s; }
+    div[data-testid="column"] > button:hover { background-color: #002366; color: #ffffff; transform: scale(1.02); }
+    div[data-testid="column"] > button:active { transform: scale(0.98); }
+    .sidebar-footer { position: fixed; bottom: 20px; width: 260px; font-size: 11px; color: #666; padding: 10px; border-top: 1px solid #ddd; }
+    h1, h2, h3 { color: #002366; font-family: 'Segoe UI', sans-serif; font-weight: 700; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. FUNCIONES DE APOYO
+# 2. FUNCIONES DE APOYO Y LIMPIEZA
 def format_hours(decimal_hours):
     if pd.isna(decimal_hours) or decimal_hours <= 0: return "0h 00m"
     hours = int(decimal_hours)
@@ -24,18 +29,37 @@ def format_hours(decimal_hours):
     if minutes == 60: hours += 1; minutes = 0
     return f"{hours}h {minutes:02d}m"
 
-@st.cache_data
+@st.cache_data(ttl=60) # Refresca el caché cada 60 segundos si hay cambios en el Excel
 def load_data():
     sheet_id = "1bNgFg5s-1qZuToCInLqCJr4FAUK51m7lrClilBZojb8"
-    csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Tipo%20de%20Daños%20(A,B,C)"
-    response = requests.get(csv_url)
-    df = pd.read_csv(io.StringIO(response.text))
-    df['Dif (2)'] = pd.to_numeric(df['Dif (2)'], errors='coerce').fillna(0)
-    df['PAÑOS'] = pd.to_numeric(df['PAÑOS'], errors='coerce')
-    df['Operario'] = df['Operario'].astype(str).str.upper().str.strip()
-    return df
+    # Codificación segura de la URL (el %C3%B1 representa la 'ñ')
+    csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Tipo%20de%20Da%C3%B1os%20(A,B,C)"
+    
+    try:
+        response = requests.get(csv_url)
+        if response.status_code != 200: return pd.DataFrame()
+        
+        df = pd.read_csv(io.StringIO(response.text))
+        
+        # MODO PRO: Auto-limpieza profunda para evitar errores de filtro
+        df.columns = df.columns.str.strip() # Quita espacios en los títulos de columnas
+        
+        # Validación de seguridad por si cambian el título en el Excel
+        if 'Tipo de Daño' not in df.columns:
+            cols = [c for c in df.columns if 'daño' in c.lower() or 'dano' in c.lower()]
+            if cols: df.rename(columns={cols[0]: 'Tipo de Daño'}, inplace=True)
+            
+        df['Dif (2)'] = pd.to_numeric(df['Dif (2)'], errors='coerce').fillna(0)
+        df['PAÑOS'] = pd.to_numeric(df['PAÑOS'], errors='coerce')
+        df['Operario'] = df['Operario'].astype(str).str.upper().str.strip()
+        df['Etapas'] = df['Etapas'].astype(str).str.upper().str.strip() # Todo a mayúscula para coincidir perfecto
+        df['Tipo de Daño'] = df['Tipo de Daño'].astype(str).str.upper().str.strip()
+        
+        return df
+    except Exception:
+        return pd.DataFrame()
 
-# Mapeo de Actividades según secuencia solicitada
+# Mapeo de Actividades (Todas en mayúsculas por seguridad)
 MAPEO_GANTT = {
     "1. RECEPCIÓN": ["RECEPCION"],
     "2. DESARME": ["DESARME", "DESARME Y CHAPA", "AYUDA DE DESARME DE CHAPA"],
@@ -51,21 +75,27 @@ MAPEO_GANTT = {
     "12. ENTREGA": ["TERMINACIONES", "LIMPIEZA"]
 }
 
-# 3. PROCESAMIENTO
+# 3. PROCESAMIENTO PRINCIPAL
 try:
     df_raw = load_data()
-    # Ignorar operarios administrativos
+    
+    if df_raw.empty:
+        st.error("🚨 Error crítico: No se pudieron descargar los datos del Google Sheet. Verifica los permisos de acceso al enlace.")
+        st.stop()
+        
     excluir_ops = ["ANDREA MARTINS", "JAVIER GUTIERREZ", "SAMUEL ANTUNEZ"]
     df = df_raw[~df_raw['Operario'].isin(excluir_ops)].copy()
 
-    # SIDEBAR
+    # 4. SIDEBAR
     with st.sidebar:
         st.title("Taller CENOA")
         opcion = st.radio("Navegación:", ["🏠 Inicio", "📈 Análisis tipo de DAÑOS", "👨‍🔧 Productividad de Operarios"], label_visibility="collapsed")
-        st.markdown("""<div style='font-size:11px; margin-top:20px;'><b>Taller CENOA Jujuy</b><br>Las Lomas 2227<br>San Salvador de Jujuy</div>""", unsafe_allow_html=True)
+        st.markdown("""<div class="sidebar-footer"><b>Taller de Chapa y Pintura CENOA Jujuy</b><br>Las Lomas 2227<br>San Salvador de Jujuy</div>""", unsafe_allow_html=True)
 
+    # 5. SUBMENÚS
     if opcion == "🏠 Inicio":
         st.title("Análisis de tiempo - Taller CENOA Jujuy")
+        st.divider()
         ordenes = df[df['PAÑOS'].notna() & (df['PAÑOS'] > 0)]['Ref.OR'].nunique()
         c1, c2 = st.columns(2)
         c1.metric("Total de orden analizada", ordenes)
@@ -79,63 +109,67 @@ try:
             st.write("### Seleccione Tipo de Daño:")
             col_a, col_b, col_c = st.columns(3)
             if 'tipo_dano' not in st.session_state: st.session_state.tipo_dano = 'A'
+            
+            # Botones de estado
             if col_a.button("DAÑO A"): st.session_state.tipo_dano = 'A'
             if col_b.button("DAÑO B"): st.session_state.tipo_dano = 'B'
             if col_c.button("DAÑO C"): st.session_state.tipo_dano = 'C'
             
             tipo = st.session_state.tipo_dano
-            df_final = df[df['Tipo de Daño'].astype(str).str.contains(tipo, na=False)]
+            
+            # Filtro blindado
+            df_final = df[df['Tipo de Daño'].str.contains(tipo, na=False)]
+
+            # MODO DEPURACIÓN VISUAL (Para el administrador)
+            with st.expander("🛠️ Modo Depuración (Ver datos crudos encontrados)"):
+                st.write(f"Filas encontradas para Daño {tipo}: {len(df_final)}")
+                st.dataframe(df_final[['Ref.OR', 'Etapas', 'Tipo de Daño', 'Dif (2)']].head(10))
 
             if not df_final.empty:
                 gantt_data = []
-                base_date = datetime(2026, 1, 1, 8, 0) # Fecha ficticia para el Gantt
+                base_date = datetime(2026, 1, 1, 8, 0)
                 
-                # Clasificar datos según el mapa de secuencia
                 for idx, (label, sub_etapas) in enumerate(MAPEO_GANTT.items()):
-                    # Filtrar filas que coincidan con las sub-etapas definidas
-                    mask = df_final['Etapas'].str.upper().isin([s.upper() for s in sub_etapas])
+                    mask = df_final['Etapas'].isin(sub_etapas)
                     promedio_h = df_final.loc[mask, 'Dif (2)'].mean()
                     
                     if pd.notnull(promedio_h) and promedio_h > 0:
                         start_time = base_date
                         end_time = start_time + timedelta(hours=promedio_h)
-                        
                         gantt_data.append(dict(Task=label, Start=start_time, Finish=end_time, Resource=label))
-                        # El siguiente bloque empieza donde termina el anterior
                         base_date = end_time
 
                 if gantt_data:
-                    st.subheader(f"Diagrama de Gantt: Flujo de Reparación - Daño {tipo}")
+                    st.subheader(f"Flujo de Reparación - DAÑO {tipo}")
                     fig = ff.create_gantt(gantt_data, index_col='Resource', show_colorbar=True, group_tasks=True, showgrid_x=True)
-                    fig.update_layout(xaxis_type='date', xaxis=dict(tickformat="%H:%M"), height=500)
+                    fig.update_layout(xaxis_type='date', xaxis=dict(tickformat="%H:%M"), height=450, showlegend=False)
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # Mostrar tabla de tiempos exacta
-                    st.write("#### Promedios por Fase Técnica")
                     resumen_df = pd.DataFrame(gantt_data)
-                    resumen_df['Duración'] = resumen_df.apply(lambda x: format_hours((x['Finish'] - x['Start']).total_seconds()/3600), axis=1)
-                    st.dataframe(resumen_df[['Task', 'Duración']].rename(columns={'Task': 'Fase'}), use_container_width=True)
+                    resumen_df['Duración Promedio'] = resumen_df.apply(lambda x: format_hours((x['Finish'] - x['Start']).total_seconds()/3600), axis=1)
+                    st.dataframe(resumen_df[['Task', 'Duración Promedio']].rename(columns={'Task': 'Fase Técnica'}), use_container_width=True)
                 else:
-                    st.warning(f"No hay actividades registradas para el Daño {tipo} en la secuencia técnica.")
+                    st.warning(f"Se encontraron registros de Daño {tipo}, pero las descripciones de 'Etapas' no coinciden con el mapeo del sistema.")
             else:
-                st.warning(f"No hay datos para el Daño {tipo}.")
+                st.warning(f"No hay registros del Daño {tipo} en la base de datos.")
         else:
             st.info(f"No hay datos cargados para {mes_sel}.")
 
     elif opcion == "👨‍🔧 Productividad de Operarios":
         st.title("👨‍🔧 Ranking de Productividad")
-        etapa_sel = st.selectbox("Fase Técnica:", list(MAPEO_GANTT.keys()))
+        etapa_sel = st.selectbox("Fase Técnica a Auditar:", list(MAPEO_GANTT.keys()))
         sub_etapas = MAPEO_GANTT[etapa_sel]
-        mask_etapa = df['Etapas'].str.upper().isin([s.upper() for s in sub_etapas])
+        
+        mask_etapa = df['Etapas'].isin(sub_etapas)
         df_op = df[mask_etapa].groupby('Operario')['Dif (2)'].mean().reset_index()
         
         if not df_op.empty:
             avg_ref = df_op['Dif (2)'].mean()
             df_op['Desempeño'] = df_op['Dif (2)'].apply(lambda x: "⚠️ Lento" if x > avg_ref else "✅ Eficiente")
-            df_op['Promedio'] = df_op['Dif (2)'].apply(format_hours)
-            st.table(df_op[['Operario', 'Promedio', 'Desempeño']].sort_values(by='Desempeño'))
+            df_op['Tiempo Promedio'] = df_op['Dif (2)'].apply(format_hours)
+            st.table(df_op[['Operario', 'Tiempo Promedio', 'Desempeño']].sort_values(by='Desempeño'))
         else:
-            st.info("Sin registros para esta fase.")
+            st.info("Sin registros de operarios para esta fase técnica.")
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Error general en el sistema: {e}")
