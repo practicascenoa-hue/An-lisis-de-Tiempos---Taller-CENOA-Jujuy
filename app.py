@@ -204,50 +204,73 @@ try:
                 st.plotly_chart(fig_comp, use_container_width=True)
 
             # --------------------------------------------------------------------------------
-            # NUEVA SECCIÓN: LÍNEA DE VIDA POR VEHÍCULO (FLUJOGRAMA)
+            # NUEVA SECCIÓN: LÍNEA DE VIDA POR VEHÍCULO (CARRIL ALINEADO)
             # --------------------------------------------------------------------------------
             st.divider()
             st.subheader(f"🚗 Flujograma de Tiempos por Vehículo - DAÑO {tipo}")
-            st.write("Visualiza el recorrido cronológico de cada vehículo (Patente). Cada segmento representa la suma de horas invertidas en ese bloque específico.")
+            st.write("Comparativa exacta: Todos los bloques inician desde el mismo punto en el eje X para facilitar la comparación de tiempos entre vehículos de una misma fase.")
 
-            # Filtramos solo los que tienen patente real para este daño específico
             df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '')].copy()
 
             if not df_vehiculos.empty:
-                # Agrupar las horas invertidas por Patente y por Bloque
                 df_gantt = df_vehiculos.groupby(['Patente', 'Bloque'])['Dif (2)'].sum().reset_index()
                 
-                # Le sacamos el número al bloque para ordenar cronológicamente la barra
                 df_gantt['Orden'] = df_gantt['Bloque'].str.extract(r'(\d+)').astype(int)
                 df_gantt = df_gantt.sort_values(['Patente', 'Orden'])
                 df_gantt['Tiempo (H:M)'] = df_gantt['Dif (2)'].apply(format_hours)
 
-                # Ordenar el eje Y (Patentes) para que los autos que tardaron MÁS queden arriba
                 orden_patentes = df_gantt.groupby('Patente')['Dif (2)'].sum().sort_values(ascending=True).index
-                # Lista de bloques ordenados del 1 al 10 para que se apilen correctamente
                 orden_bloques = sorted(df_gantt['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
 
-                # Gráfico de Barras Apiladas (Stacked Bar Chart)
+                # --- LÓGICA DE ALINEACIÓN POR BLOQUES ---
+                base_dict = {}
+                current_base = 0
+                tick_vals = []
+                tick_texts = []
+                
+                for b in orden_bloques:
+                    base_dict[b] = current_base
+                    tick_vals.append(current_base)
+                    # Extraer nombre limpio (ej. "CHAPA") para el título del eje X
+                    tick_texts.append(b.split('. ')[-1])
+                    
+                    # El siguiente bloque comenzará después del máximo tiempo que tardó este bloque + 1 hora de margen
+                    max_dur = df_gantt[df_gantt['Bloque'] == b]['Dif (2)'].max()
+                    current_base += (max_dur + 1.5)
+
+                # Asignamos el punto de inicio (base) calculado a cada fila
+                df_gantt['Base_Inicio'] = df_gantt['Bloque'].map(base_dict)
+
+                # Gráfico con base fija
                 fig_vehiculos = px.bar(
                     df_gantt,
                     x='Dif (2)',
                     y='Patente',
+                    base='Base_Inicio',
                     color='Bloque',
                     orientation='h',
-                    title=f"Tiempo Total de Intervención por Auto (Daño {tipo})",
+                    title=f"Línea de Vida Alineada por Fase (Daño {tipo})",
                     labels={'Dif (2)': 'Total de Horas', 'Patente': 'Patente'},
-                    hover_data={'Tiempo (H:M)': True, 'Dif (2)': False, 'Orden': False},
-                    category_orders={'Patente': orden_patentes, 'Bloque': orden_bloques} # Fuerza el orden lógico
+                    hover_data={'Tiempo (H:M)': True, 'Dif (2)': False, 'Base_Inicio': False, 'Orden': False},
+                    category_orders={'Patente': orden_patentes, 'Bloque': orden_bloques}
                 )
                 
-                # Configuramos barmode='stack' para que se comporten como un flujo de tiempo
                 fig_vehiculos.update_layout(
-                    barmode='stack', 
-                    height=max(400, len(orden_patentes) * 35), # Se estira automáticamente si hay muchos autos
-                    legend_title="Flujo Técnico",
-                    xaxis_title="Acumulado de Horas Trabajadas",
+                    height=max(400, len(orden_patentes) * 35),
+                    showlegend=False, # Leyenda no es necesaria porque los títulos están en el eje X
+                    xaxis=dict(
+                        tickmode='array',
+                        tickvals=tick_vals,
+                        ticktext=tick_texts, # Escribirá "DESARME", "CHAPA", etc.
+                        title="",
+                        gridcolor='rgba(200, 200, 200, 0.2)'
+                    ),
                     yaxis_title=""
                 )
+                
+                # Añadir líneas punteadas de inicio para cada bloque
+                for val in tick_vals:
+                    fig_vehiculos.add_vline(x=val, line_dash="dot", line_color="gray", opacity=0.7)
                 
                 st.plotly_chart(fig_vehiculos, use_container_width=True)
             else:
