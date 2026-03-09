@@ -54,20 +54,18 @@ def load_data():
     except Exception:
         return pd.DataFrame()
 
-# Mapeo actualizado de Bloques y Actividades
+# Mapeo actualizado de Bloques (10 Etapas puramente operativas)
 MAPEO_BLOQUES = {
-    "1. RECEPCIÓN": ["RECEPCION"],
-    "2. DESARME": ["DESARME", "DESARMADO", "DESARME Y CHAPA", "AYUDA DE DESARME DE CHAPA"],
-    "3. CHAPA": ["CHAPA", "MASILLADO Y LIJADO"],
-    "4. PREPARADO": ["PREPARADO", "PREPARADO PARAGOLPE", "PREPARADO PARAGOLPE DELANTERO", "PREPARADO CAPERUZA", "PREPARADO DE TAPA DE BAUL", "PREPARACION DE PARAGOLPE", "EMPAPELADO", "LIJADO", "LIJADO PRIMER"],
-    "5. APLICACIÓN DE PRIMER": ["APLICACION DE PRIMER"],
-    "6. COLORIMETRÍA": ["COLORIMETRIA", "C0LORIMETRIA"],
-    "7. PINTADO": ["PINTADO", "PINTAR", "PREPRACION Y PINTADO TEXTURADO PARAGOLPE"],
-    "8. ARMADO": ["ARMADO", "REEMPLAZO", "REEMPLAZO DE VIDRIOS", "REEMPLAZO PARABRISAS Y PULIDO", "COLOCACION DE VIDRIO Y PULIDO"],
-    "9. PULIDO": ["PULIDO", "PULIDO Y LUSTRADO", "LUSTRADO", "LIJADO Y PULIDO", "LIJADO Y LUSTRADO", "ENCERADO Y PULIDO", "PULIDO PARAGOLPE", "PULIDO GUARDABARRO", "PULIDO Y LASTRE"],
-    "10. LAVADO": ["LAVADO", "PULIDO Y LAVADO", "LUSTRADO Y LAVADO", "LIJADO, PULIDO Y LAVADO", "LIJADO, PULIDO Y LUSTRADO DE PIEZAS PINTADA JUNTO CON LAVADO"],
-    "11. CONTROL DE CALIDAD": ["CONTROL DE CALIDAD"],
-    "12. ENTREGA": ["TERMINACIONES", "LIMPIEZA"]
+    "1. DESARME": ["DESARME"],
+    "2. CHAPA": ["CHAPA", "MASILLADO Y LIJADO"],
+    "3. PREPARADO": ["PREPARADO", "PREPARADO PARAGOLPE", "PREPARADO PARAGOLPE DELANTERO", "PREPARADO CAPERUZA", "PREPARADO DE TAPA DE BAUL", "PREPARACION DE PARAGOLPE", "EMPAPELADO", "LIJADO", "LIJADO PRIMER"],
+    "4. APLICACIÓN DE PRIMER": ["APLICACION DE PRIMER"],
+    "5. COLORIMETRÍA": ["COLORIMETRIA", "C0LORIMETRIA"],
+    "6. PINTADO": ["PINTADO", "PINTAR", "PREPRACION Y PINTADO TEXTURADO PARAGOLPE"],
+    "7. ARMADO": ["ARMADO", "REEMPLAZO", "REEMPLAZO DE VIDRIOS", "REEMPLAZO PARABRISAS Y PULIDO", "COLOCACION DE VIDRIO Y PULIDO"],
+    "8. PULIDO": ["PULIDO", "PULIDO Y LUSTRADO", "LUSTRADO", "LIJADO Y PULIDO", "LIJADO Y LUSTRADO", "ENCERADO Y PULIDO", "PULIDO PARAGOLPE", "PULIDO GUARDABARRO", "PULIDO Y LASTRE"],
+    "9. LAVADO": ["LAVADO", "PULIDO Y LAVADO", "LUSTRADO Y LAVADO", "LIJADO, PULIDO Y LAVADO", "LIJADO, PULIDO Y LUSTRADO DE PIEZAS PINTADA JUNTO CON LAVADO"],
+    "10. ENTREGA": ["TERMINACIONES", "LIMPIEZA"]
 }
 
 # Función para asignar el bloque a cada etapa
@@ -121,14 +119,15 @@ try:
             
             tipo = st.session_state.tipo_dano
             
-            # Filtro por tipo de daño y quitar los no clasificados si lo deseas
+            # Filtro por tipo de daño y quitar los no clasificados (así no se ensucia el gráfico)
             df_final = df[(df['Tipo de Daño'].str.contains(tipo, na=False)) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
 
             if not df_final.empty:
                 # 1. Agrupación a nivel de BLOQUES
                 resumen_bloques = df_final.groupby('Bloque')['Dif (2)'].mean().reset_index()
-                # Ordenar cronológicamente (aprovechando el número en el nombre del bloque, ej: "1. RECEPCIÓN")
-                resumen_bloques['Orden'] = resumen_bloques['Bloque'].str.extract('(\d+)').astype(int)
+                
+                # Extraemos el número del bloque ("1. DESARME" -> 1) para ordenar cronológicamente
+                resumen_bloques['Orden'] = resumen_bloques['Bloque'].str.extract(r'(\d+)').astype(int)
                 resumen_bloques = resumen_bloques.sort_values('Orden')
                 
                 resumen_bloques['Tiempo (H:M)'] = resumen_bloques['Dif (2)'].apply(format_hours)
@@ -156,18 +155,18 @@ try:
                 
                 resumen_detallado = df_final.groupby(['Bloque', 'Etapas'])['Dif (2)'].mean().reset_index()
                 
-                # Ordenar lógicamente por el bloque y luego de mayor a menor tiempo
-                resumen_detallado['Orden'] = resumen_detallado['Bloque'].str.extract('(\d+)').astype(int)
+                # Ordenar lógicamente por el número de bloque y luego de mayor a menor tiempo
+                resumen_detallado['Orden'] = resumen_detallado['Bloque'].str.extract(r'(\d+)').astype(int)
                 resumen_detallado = resumen_detallado.sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
                 
                 resumen_detallado['Tiempo Promedio'] = resumen_detallado['Dif (2)'].apply(format_hours)
                 
-                # Mostrar la tabla formateada limpiando columnas auxiliares
+                # Mostrar la tabla formateada
                 tabla_mostrar = resumen_detallado[['Bloque', 'Etapas', 'Tiempo Promedio']].rename(columns={'Etapas': 'Actividad Específica'})
                 st.dataframe(tabla_mostrar, use_container_width=True, hide_index=True)
 
             else:
-                st.warning(f"No hay registros del Daño {tipo} clasificados en las fases estándar.")
+                st.warning(f"No hay registros del Daño {tipo} clasificados en las fases estándar operativas.")
         else:
             st.info(f"No hay datos cargados para {mes_sel}.")
 
