@@ -60,22 +60,20 @@ MAPEO_BLOQUES = {
     "2. CHAPA": ["CHAPA", "MASILLADO Y LIJADO"],
     "3. PREPARADO": ["PREPARADO", "PREPARADO PARAGOLPE", "PREPARADO PARAGOLPE DELANTERO", "PREPARADO CAPERUZA", "PREPARADO DE TAPA DE BAUL", "PREPARACION DE PARAGOLPE", "EMPAPELADO", "LIJADO", "LIJADO PRIMER"],
     "4. APLICACIÓN DE PRIMER": ["APLICACION DE PRIMER"],
-    "5. COLORIMETRÍA": ["COLORIMETRIA"],
-    "6. PINTADO": ["PINTADO", "PREPRACION Y PINTADO TEXTURADO PARAGOLPE"],
+    "5. COLORIMETRÍA": ["COLORIMETRIA", "C0LORIMETRIA"],
+    "6. PINTADO": ["PINTADO", "PINTAR", "PREPRACION Y PINTADO TEXTURADO PARAGOLPE"],
     "7. ARMADO": ["ARMADO", "REEMPLAZO", "REEMPLAZO DE VIDRIOS", "REEMPLAZO PARABRISAS Y PULIDO", "COLOCACION DE VIDRIO Y PULIDO"],
     "8. PULIDO": ["PULIDO", "PULIDO Y LUSTRADO", "LUSTRADO", "LIJADO Y PULIDO", "LIJADO Y LUSTRADO", "ENCERADO Y PULIDO", "PULIDO PARAGOLPE", "PULIDO GUARDABARRO", "PULIDO Y LASTRE"],
     "9. LAVADO": ["LAVADO", "PULIDO Y LAVADO", "LUSTRADO Y LAVADO", "LIJADO, PULIDO Y LAVADO", "LIJADO, PULIDO Y LUSTRADO DE PIEZAS PINTADA JUNTO CON LAVADO"],
     "10. ENTREGA": ["TERMINACIONES", "LIMPIEZA"]
 }
 
-# Función para asignar el bloque a cada etapa
 def obtener_bloque(etapa):
     for bloque, sub_etapas in MAPEO_BLOQUES.items():
         if etapa in sub_etapas:
             return bloque
     return "OTRO / NO CLASIFICADO"
 
-# Función para simplificar el tipo de daño (Asegura que sea solo A, B o C)
 def limpiar_dano(val):
     val = str(val).upper()
     if 'A' in val: return 'A'
@@ -94,7 +92,6 @@ try:
     excluir_ops = ["ANDREA MARTINS", "JAVIER GUTIERREZ", "SAMUEL ANTUNEZ"]
     df = df_raw[~df_raw['Operario'].isin(excluir_ops)].copy()
     
-    # Asignar el bloque a cada fila y limpiar el daño
     df['Bloque'] = df['Etapas'].apply(obtener_bloque)
     df['Tipo Limpio'] = df['Tipo de Daño'].apply(limpiar_dano)
 
@@ -127,8 +124,6 @@ try:
             if col_c.button("DAÑO C"): st.session_state.tipo_dano = 'C'
             
             tipo = st.session_state.tipo_dano
-            
-            # Filtro por tipo de daño y quitar los no clasificados
             df_final = df[(df['Tipo Limpio'] == tipo) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
 
             if not df_final.empty:
@@ -138,7 +133,8 @@ try:
                 resumen_bloques = resumen_bloques.sort_values('Orden')
                 resumen_bloques['Tiempo (H:M)'] = resumen_bloques['Dif (2)'].apply(format_hours)
 
-                st.subheader(f"Promedio de Tiempos por Fase General - DAÑO {tipo}")
+                # --- NUEVO TÍTULO APLICADO AQUÍ ---
+                st.subheader(f"Promedio de Tiempos - DAÑO {tipo}")
                 
                 fig = px.bar(
                     resumen_bloques, 
@@ -156,8 +152,9 @@ try:
                 st.divider()
 
                 # 2. Agrupación a nivel de ETAPAS DETALLADAS
-                st.subheader(f"Desglose Detallado de Actividades - DAÑO {tipo}")
-                st.write("Visualiza el tiempo exacto de cada tarea individual que compone los bloques superiores.")
+                # --- NUEVOS TÍTULOS APLICADOS AQUÍ ---
+                st.subheader(f"Detalle de Actividades - DAÑO {tipo}")
+                st.write("Tiempo promedio de cada tarea individual que compone los bloques superiores")
                 
                 resumen_detallado = df_final.groupby(['Bloque', 'Etapas'])['Dif (2)'].mean().reset_index()
                 resumen_detallado['Orden'] = resumen_detallado['Bloque'].str.extract(r'(\d+)').astype(int)
@@ -170,25 +167,20 @@ try:
             else:
                 st.warning(f"No hay registros del Daño {tipo} clasificados en las fases estándar operativas.")
 
-            # --------------------------------------------------------------------------------
-            # NUEVA SECCIÓN: 3. COMPARATIVA GLOBAL DE DAÑOS A vs B vs C
-            # --------------------------------------------------------------------------------
+            # 3. COMPARATIVA GLOBAL DE DAÑOS A vs B vs C
             st.divider()
             st.subheader("📊 Comparativa de Tiempos por Bloque (Daño A vs B vs C)")
-            st.write("Esta gráfica compara el tiempo promedio de cada fase principal sin importar las actividades internas.")
+            # --- NUEVA NOTA APLICADA AQUÍ ---
+            st.write("Nota: Esta gráfica compara el tiempo promedio de cada bloque principal independientemente de las actividades internas que las componen")
 
-            # Filtramos todos los daños (A, B y C) excluyendo los no clasificados
             df_comp = df[(df['Tipo Limpio'].isin(['A', 'B', 'C'])) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
 
             if not df_comp.empty:
                 resumen_comp = df_comp.groupby(['Bloque', 'Tipo Limpio'])['Dif (2)'].mean().reset_index()
-                
-                # Orden lógico
                 resumen_comp['Orden'] = resumen_comp['Bloque'].str.extract(r'(\d+)').astype(int)
                 resumen_comp = resumen_comp.sort_values(['Orden', 'Tipo Limpio'])
                 resumen_comp['Tiempo (H:M)'] = resumen_comp['Dif (2)'].apply(format_hours)
 
-                # Gráfico de barras agrupadas (barmode='group')
                 fig_comp = px.bar(
                     resumen_comp,
                     x='Bloque',
@@ -198,10 +190,9 @@ try:
                     text='Tiempo (H:M)',
                     title=f"Comparativa General de Bloques - Mes: {mes_sel}",
                     labels={'Dif (2)': 'Promedio en Horas', 'Bloque': 'Fases del Taller', 'Tipo Limpio': 'Tipo de Daño'},
-                    color_discrete_map={'A': '#00cc96', 'B': '#ff9900', 'C': '#ef553b'}  # Verde, Naranja, Rojo
+                    color_discrete_map={'A': '#00cc96', 'B': '#ff9900', 'C': '#ef553b'}
                 )
                 
-                # Ajustes visuales para que no se superpongan los textos
                 fig_comp.update_traces(textposition='outside', textfont_size=10)
                 fig_comp.update_layout(yaxis_title="Horas Promedio", xaxis_title="", legend_title="Daño")
                 
