@@ -83,7 +83,7 @@ def load_data():
 
 # Mapeo actualizado de Bloques (10 Etapas puramente operativas)
 MAPEO_BLOQUES = {
-    "1. DESARME": ["DESARME"],
+    "1. DESARME": ["DESARME", "DESARMADO", "DESARME Y CHAPA", "AYUDA DE DESARME DE CHAPA"],
     "2. CHAPA": ["CHAPA", "MASILLADO Y LIJADO"],
     "3. PREPARADO": ["PREPARADO", "PREPARADO PARAGOLPE", "PREPARADO PARAGOLPE DELANTERO", "PREPARADO CAPERUZA", "PREPARADO DE TAPA DE BAUL", "PREPARACION DE PARAGOLPE", "EMPAPELADO", "LIJADO", "LIJADO PRIMER"],
     "4. APLICACIÓN DE PRIMER": ["APLICACION DE PRIMER"],
@@ -169,8 +169,24 @@ try:
                 # LÍNEA DE VIDA Y TIEMPO MUERTO (ALINEADO AL MÁXIMO)
                 # --------------------------------------------------------------------------------
                 st.divider()
-                st.subheader(f"🚗 Flujograma de Tiempos por Vehículo - DAÑO {tipo}")
-                st.write("La barra a color indica el **tiempo real trabajado**. La barra gris (Tiempo Muerto) completa el espacio hasta igualar el tiempo del vehículo que más demoró en ese bloque, alineando así el inicio de la siguiente etapa para todos los vehículos.")
+                st.subheader(f"🚗 Diagrama de Tiempos por Vehículo - DAÑO {tipo}")
+                
+                # Texto descriptivo solicitado
+                st.markdown("""
+                Para el analisis del diagrama se consideró un agrupamiento de actividades en Bloques:
+                - **DESARME:** DESARME - DESARMADO - DESARME Y CHAPA - AYUDA DE DESARME DE CHAPA
+                - **CHAPA:** CHAPA - MASILLADO Y LIJADO
+                - **PREPARADO:** PREPARADO - PREPARADO PARAGOLPE - PREPARADO PARAGOLPE DELANTERO - PREPARADO CAPERUZA - PREPARADO DE TAPA DE BAUL - PREPARACION DE PARAGOLPE - EMPAPELADO - LIJADO - LIJADO PRIMER
+                - **APLICACIÓN DE PRIMER:** APLICACION DE PRIMER
+                - **COLORIMETRÍA:** COLORIMETRIA
+                - **PINTADO:** PINTADO - PREPRACION Y PINTADO TEXTURADO PARAGOLPE
+                - **ARMADO:** ARMADO - REEMPLAZO - REEMPLAZO DE VIDRIOS - REEMPLAZO PARABRISAS Y PULIDO - COLOCACION DE VIDRIO Y PULIDO
+                - **PULIDO:** PULIDO - PULIDO Y LUSTRADO - LUSTRADO - LIJADO Y PULIDO - LIJADO Y LUSTRADO - ENCERADO Y PULIDO - PULIDO PARAGOLPE - PULIDO GUARDABARRO - PULIDO Y LASTRE
+                - **LAVADO:** LAVADO - PULIDO Y LAVADO - LUSTRADO Y LAVADO - LIJADO, PULIDO Y LAVADO - LIJADO, PULIDO Y LUSTRADO DE PIEZAS PINTADA JUNTO CON LAVADO
+                - **ENTREGA:** TERMINACIONES - LIMPIEZA
+                
+                La barra a color indica el **tiempo real trabajado**. La barra gris (Tiempo Muerto) completa el espacio hasta igualar el tiempo del vehículo que más demoró en ese bloque, alineando así el inicio de la siguiente etapa para todos los vehículos.
+                """)
 
                 df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '')].copy()
 
@@ -239,7 +255,7 @@ try:
                         color='Tipo',
                         orientation='h',
                         text='Texto', 
-                        title=f"Línea de Vida Alineada y Tiempo Muerto (Daño {tipo})",
+                        title=f"Diagrama de Tiempos y Tiempos Muertos (Daño {tipo})",
                         labels={'Duracion': 'Horas', 'Patente': 'Patente'},
                         hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden': False, 'Tipo': False},
                         category_orders={'Patente': orden_patentes},
@@ -272,7 +288,7 @@ try:
                     fig_vehiculos.update_traces(textposition='auto', textfont_size=11)
                     st.plotly_chart(fig_vehiculos, use_container_width=True)
                 else:
-                    st.warning(f"No hay registros de patentes válidas para graficar el flujograma del Daño {tipo}.")
+                    st.warning(f"No hay registros de patentes válidas para graficar el diagrama del Daño {tipo}.")
 
             else:
                 st.warning(f"No hay registros del Daño {tipo} clasificados en las fases estándar operativas.")
