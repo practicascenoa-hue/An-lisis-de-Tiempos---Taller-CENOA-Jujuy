@@ -166,12 +166,11 @@ try:
 
             if not df_final.empty:
                 # --------------------------------------------------------------------------------
-                # LÍNEA DE VIDA Y TIEMPO MUERTO (ALINEADO AL MÁXIMO)
+                # DIAGRAMA DE TIEMPOS POR VEHÍCULO (GENERAL ALINEADO AL MÁXIMO)
                 # --------------------------------------------------------------------------------
                 st.divider()
                 st.subheader(f"🚗 Diagrama de Tiempos por Vehículo - DAÑO {tipo}")
                 
-                # Texto descriptivo solicitado
                 st.markdown("""
                 Para el analisis del diagrama se consideró un agrupamiento de actividades en Bloques:
                 - **DESARME:** DESARME - DESARMADO - DESARME Y CHAPA - AYUDA DE DESARME DE CHAPA
@@ -275,7 +274,7 @@ try:
                         ),
                         yaxis=dict(
                             title="",
-                            showgrid=True, # LÍNEAS HORIZONTALES POR VEHÍCULO
+                            showgrid=True,
                             gridcolor='rgba(150, 150, 150, 0.4)',
                             gridwidth=1,
                             griddash='dot'
@@ -289,17 +288,18 @@ try:
                     st.plotly_chart(fig_vehiculos, use_container_width=True)
                     
                     # --------------------------------------------------------------------------------
-                    # NUEVA SECCIÓN: DETALLE INDIVIDUAL
+                    # DETALLE INDIVIDUAL Y TABLAS DESGLOSADAS
                     # --------------------------------------------------------------------------------
                     st.divider()
                     st.subheader("🔎 Detalle del Diagrama para cada vehículo")
-                    st.write("Selecciona una patente para aislar su línea de tiempo. El gráfico mantiene la misma escala del diagrama principal para facilitar la comparación visual.")
+                    st.write("Selecciona una patente para aislar su línea de tiempo y ver el desglose exacto de operarios y actividades que justifican las horas de cada bloque.")
                     
                     vehiculo_sel = st.selectbox("Seleccione un vehículo (Patente):", sorted(df_vehiculos['Patente'].unique()))
                     
                     df_plot_ind = df_plot[df_plot['Patente'] == vehiculo_sel]
                     
                     if not df_plot_ind.empty:
+                        # 1. Gráfico aislado del vehículo
                         fig_ind = px.bar(
                             df_plot_ind,
                             x='Duracion',
@@ -314,11 +314,10 @@ try:
                             color_discrete_map=color_map
                         )
                         
-                        # Mantiene la escala del eje X exactamente igual que el gráfico general
                         max_escala_x = current_base 
                         
                         fig_ind.update_layout(
-                            height=250, # Más pequeño ya que es una sola barra
+                            height=200, 
                             showlegend=True,
                             legend_title="Actividad / Demora",
                             xaxis=dict(
@@ -337,6 +336,41 @@ try:
 
                         fig_ind.update_traces(textposition='auto', textfont_size=11)
                         st.plotly_chart(fig_ind, use_container_width=True)
+                        
+                        # 2. Tablas detalladas por bloque para este vehículo
+                        st.markdown(f"### 📋 Detalle Operativo: {vehiculo_sel}")
+                        
+                        # Filtramos los datos crudos del vehículo seleccionado
+                        df_veh_det = df_vehiculos[df_vehiculos['Patente'] == vehiculo_sel].copy()
+                        # Extraemos el orden para mostrar los bloques cronológicamente
+                        df_veh_det['Orden'] = df_veh_det['Bloque'].str.extract(r'(\d+)').astype(int)
+                        df_veh_det = df_veh_det.sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
+                        
+                        # Mostramos las tablas iterando por cada bloque
+                        bloques_presentes = df_veh_det['Bloque'].unique()
+                        
+                        for b in bloques_presentes:
+                            # Filtramos los registros solo de este bloque
+                            df_b = df_veh_det[df_veh_det['Bloque'] == b].copy()
+                            
+                            # Sumamos el tiempo (debe ser igual a lo graficado en la barra de color)
+                            total_horas_bloque = df_b['Dif (2)'].sum()
+                            
+                            st.markdown(f"**{b}**")
+                            
+                            # Formateamos los datos a mostrar en la tabla
+                            df_show = df_b[['Operario', 'Etapas', 'Dif (2)']].copy()
+                            df_show['Duración'] = df_show['Dif (2)'].apply(format_hours)
+                            df_show = df_show[['Operario', 'Etapas', 'Duración']]
+                            df_show.rename(columns={'Etapas': 'Actividad Específica'}, inplace=True)
+                            
+                            # Renderizamos la tabla
+                            st.dataframe(df_show, hide_index=True, use_container_width=True)
+                            
+                            # Totalizador al pie de la tabla
+                            st.caption(f"⏱️ Suma total de horas reales trabajadas en {b}: **{format_hours(total_horas_bloque)}**")
+                            st.write("---") # Pequeño separador entre tablas
+
                     else:
                         st.info("No hay datos calculados para el vehículo seleccionado.")
 
