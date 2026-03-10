@@ -287,6 +287,59 @@ try:
 
                     fig_vehiculos.update_traces(textposition='auto', textfont_size=11)
                     st.plotly_chart(fig_vehiculos, use_container_width=True)
+                    
+                    # --------------------------------------------------------------------------------
+                    # NUEVA SECCIÓN: DETALLE INDIVIDUAL
+                    # --------------------------------------------------------------------------------
+                    st.divider()
+                    st.subheader("🔎 Detalle del Diagrama para cada vehículo")
+                    st.write("Selecciona una patente para aislar su línea de tiempo. El gráfico mantiene la misma escala del diagrama principal para facilitar la comparación visual.")
+                    
+                    vehiculo_sel = st.selectbox("Seleccione un vehículo (Patente):", sorted(df_vehiculos['Patente'].unique()))
+                    
+                    df_plot_ind = df_plot[df_plot['Patente'] == vehiculo_sel]
+                    
+                    if not df_plot_ind.empty:
+                        fig_ind = px.bar(
+                            df_plot_ind,
+                            x='Duracion',
+                            y='Patente',
+                            base='Base_Inicio',
+                            color='Tipo',
+                            orientation='h',
+                            text='Texto', 
+                            title=f"Línea de Vida - Vehículo: {vehiculo_sel}",
+                            labels={'Duracion': 'Horas', 'Patente': 'Patente'},
+                            hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden': False, 'Tipo': False},
+                            color_discrete_map=color_map
+                        )
+                        
+                        # Mantiene la escala del eje X exactamente igual que el gráfico general
+                        max_escala_x = current_base 
+                        
+                        fig_ind.update_layout(
+                            height=250, # Más pequeño ya que es una sola barra
+                            showlegend=True,
+                            legend_title="Actividad / Demora",
+                            xaxis=dict(
+                                tickmode='array',
+                                tickvals=tick_vals,
+                                ticktext=tick_texts, 
+                                title="",
+                                gridcolor='rgba(200, 200, 200, 0.2)',
+                                range=[0, max_escala_x]
+                            ),
+                            yaxis=dict(title="")
+                        )
+
+                        for val in tick_vals:
+                            fig_ind.add_vline(x=val, line_dash="dot", line_color="gray", opacity=0.7)
+
+                        fig_ind.update_traces(textposition='auto', textfont_size=11)
+                        st.plotly_chart(fig_ind, use_container_width=True)
+                    else:
+                        st.info("No hay datos calculados para el vehículo seleccionado.")
+
                 else:
                     st.warning(f"No hay registros de patentes válidas para graficar el diagrama del Daño {tipo}.")
 
