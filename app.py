@@ -184,7 +184,7 @@ try:
                 - **LAVADO:** LAVADO - PULIDO Y LAVADO - LUSTRADO Y LAVADO - LIJADO, PULIDO Y LAVADO - LIJADO, PULIDO Y LUSTRADO DE PIEZAS PINTADA JUNTO CON LAVADO
                 - **ENTREGA:** TERMINACIONES - LIMPIEZA
                 
-                La barra a color indica el **tiempo real trabajado**. La barra gris (Tiempo Muerto) completa el espacio hasta igualar el tiempo del vehículo que más demoró en ese bloque, alineando así el inicio de la siguiente etapa para todos los vehículos.
+                La barra a color indica el **tiempo real trabajado**. La barra gris (Mudas de trabajo) completa el espacio hasta igualar el tiempo del vehículo que más demoró en ese bloque, alineando así el inicio de la siguiente etapa para todos los vehículos.
                 """)
 
                 df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '')].copy()
@@ -197,8 +197,8 @@ try:
                     max_por_bloque.rename(columns={'Trabajo_Real': 'Max_Bloque'}, inplace=True)
 
                     agrupado = agrupado.merge(max_por_bloque, on='Bloque')
-                    agrupado['Tiempo_Muerto'] = agrupado['Max_Bloque'] - agrupado['Trabajo_Real']
-                    agrupado['Tiempo_Muerto'] = agrupado['Tiempo_Muerto'].apply(lambda x: x if x > 0.01 else 0)
+                    agrupado['Muda_Trabajo'] = agrupado['Max_Bloque'] - agrupado['Trabajo_Real']
+                    agrupado['Muda_Trabajo'] = agrupado['Muda_Trabajo'].apply(lambda x: x if x > 0.01 else 0)
 
                     orden_bloques = sorted(agrupado['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
 
@@ -225,15 +225,15 @@ try:
                             'Orden': int(row['Bloque'].split('.')[0]),
                             'Texto': format_hours(row['Trabajo_Real'])
                         })
-                        if row['Tiempo_Muerto'] > 0:
+                        if row['Muda_Trabajo'] > 0:
                             plot_data.append({
                                 'Patente': row['Patente'],
                                 'Bloque': row['Bloque'],
-                                'Tipo': '⏳ Tiempo Muerto',
-                                'Duracion': row['Tiempo_Muerto'],
+                                'Tipo': '⏳ Mudas de trabajo',
+                                'Duracion': row['Muda_Trabajo'],
                                 'Base_Inicio': base_dict[row['Bloque']] + row['Trabajo_Real'],
                                 'Orden': int(row['Bloque'].split('.')[0]) + 0.5,
-                                'Texto': format_hours(row['Tiempo_Muerto']) + " (M)"
+                                'Texto': format_hours(row['Muda_Trabajo']) + " (Muda)"
                             })
 
                     df_plot = pd.DataFrame(plot_data)
@@ -241,7 +241,7 @@ try:
 
                     orden_patentes = agrupado.groupby('Patente')['Trabajo_Real'].sum().sort_values(ascending=True).index
 
-                    color_map = {'⏳ Tiempo Muerto': '#e0e0e0'} 
+                    color_map = {'⏳ Mudas de trabajo': '#e0e0e0'} 
                     colores_base = px.colors.qualitative.Plotly
                     for i, b in enumerate(orden_bloques):
                         color_map[b] = colores_base[i % len(colores_base)]
@@ -254,7 +254,7 @@ try:
                         color='Tipo',
                         orientation='h',
                         text='Texto', 
-                        title=f"Diagrama de Tiempos y Tiempos Muertos (Daño {tipo})",
+                        title=f"Diagrama de Tiempos y Mudas de trabajo (Daño {tipo})",
                         labels={'Duracion': 'Horas', 'Patente': 'Patente'},
                         hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden': False, 'Tipo': False},
                         category_orders={'Patente': orden_patentes},
@@ -274,7 +274,7 @@ try:
                         ),
                         yaxis=dict(
                             title="",
-                            showgrid=True, # LÍNEAS HORIZONTALES POR VEHÍCULO
+                            showgrid=True, 
                             gridcolor='rgba(150, 150, 150, 0.4)',
                             gridwidth=1,
                             griddash='dot'
@@ -336,43 +336,72 @@ try:
 
                         fig_ind.update_traces(textposition='auto', textfont_size=11)
                         st.plotly_chart(fig_ind, use_container_width=True)
+
+                        # --- NUEVO: CUADRO DE RESUMEN DEL VEHÍCULO ---
+                        st.markdown(f"### Resumen")
+                        col_res1, col_res2 = st.columns(2)
+                        
+                        total_real_veh = df_plot_ind[df_plot_ind['Tipo'] != '⏳ Mudas de trabajo']['Duracion'].sum()
+                        total_mudas_veh = df_plot_ind[df_plot_ind['Tipo'] == '⏳ Mudas de trabajo']['Duracion'].sum()
+                        
+                        col_res1.metric("Tiempo Total Utilizado (Trabajo Real)", format_hours(total_real_veh))
+                        col_res2.metric("Tiempo Total de Mudas de Trabajo", format_hours(total_mudas_veh))
                         
                         # 2. Tablas detalladas por bloque para este vehículo
                         st.markdown(f"### 📋 Detalle Operativo: {vehiculo_sel}")
                         
-                        # Filtramos los datos crudos del vehículo seleccionado
                         df_veh_det = df_vehiculos[df_vehiculos['Patente'] == vehiculo_sel].copy()
-                        # Extraemos el orden para mostrar los bloques cronológicamente
                         df_veh_det['Orden'] = df_veh_det['Bloque'].str.extract(r'(\d+)').astype(int)
                         df_veh_det = df_veh_det.sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
                         
-                        # Mostramos las tablas iterando por cada bloque
                         bloques_presentes = df_veh_det['Bloque'].unique()
                         
                         for b in bloques_presentes:
-                            # Filtramos los registros solo de este bloque
                             df_b = df_veh_det[df_veh_det['Bloque'] == b].copy()
-                            
-                            # Sumamos el tiempo
                             total_horas_bloque = df_b['Dif (2)'].sum()
                             
                             st.markdown(f"**{b}**")
                             
-                            # Formateamos los datos a mostrar en la tabla
                             df_show = df_b[['Operario', 'Etapas', 'Dif (2)']].copy()
                             df_show['Duración'] = df_show['Dif (2)'].apply(format_hours)
                             df_show = df_show[['Operario', 'Etapas', 'Duración']]
                             df_show.rename(columns={'Etapas': 'Actividad Específica'}, inplace=True)
                             
-                            # Renderizamos la tabla
                             st.dataframe(df_show, hide_index=True, use_container_width=True)
-                            
-                            # Totalizador al pie de la tabla
                             st.caption(f"⏱️ Suma total de horas reales trabajadas en {b}: **{format_hours(total_horas_bloque)}**")
                             st.write("---") 
 
                     else:
                         st.info("No hay datos calculados para el vehículo seleccionado.")
+
+                    # --------------------------------------------------------------------------------
+                    # NUEVO: RESUMEN GENERAL DE TIEMPOS AL FINAL
+                    # --------------------------------------------------------------------------------
+                    st.divider()
+                    st.subheader("Resumen general de tiempos")
+                    
+                    total_vehiculos_dano = df_vehiculos['Patente'].nunique()
+                    st.write(f"**Cantidad total de vehículos con Daño {tipo}:** {total_vehiculos_dano}")
+                    
+                    # Consolidamos la información por bloque a partir de la variable 'agrupado'
+                    resumen_global = agrupado.groupby('Bloque').agg(
+                        Vehiculos_en_Bloque=('Patente', 'nunique'),
+                        Horas_Totales=('Trabajo_Real', 'sum'),
+                        Mudas_Totales=('Muda_Trabajo', 'sum')
+                    ).reset_index()
+                    
+                    resumen_global['Orden'] = resumen_global['Bloque'].str.extract(r'(\d+)').astype(int)
+                    resumen_global = resumen_global.sort_values('Orden')
+                    
+                    resumen_global['Horas Reales Totales (H:M)'] = resumen_global['Horas_Totales'].apply(format_hours)
+                    resumen_global['Mudas Totales (H:M)'] = resumen_global['Mudas_Totales'].apply(format_hours)
+                    
+                    tabla_resumen = resumen_global[['Bloque', 'Vehiculos_en_Bloque', 'Horas Reales Totales (H:M)', 'Mudas Totales (H:M)']].rename(columns={
+                        'Bloque': 'Fase / Bloque',
+                        'Vehiculos_en_Bloque': 'Cantidad de Vehículos'
+                    })
+                    
+                    st.dataframe(tabla_resumen, hide_index=True, use_container_width=True)
 
                 else:
                     st.warning(f"No hay registros de patentes válidas para graficar el diagrama del Daño {tipo}.")
