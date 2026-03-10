@@ -125,7 +125,7 @@ try:
     # 4. SIDEBAR
     with st.sidebar:
         st.title("Taller CENOA")
-        opcion = st.radio("Navegación:", ["🏠 Inicio", "📈 Análisis tipo de DAÑOS", "👨‍🔧 Productividad de Operarios"], label_visibility="collapsed")
+        opcion = st.radio("Navegación:", ["🏠 Inicio", "📈 Análisis tipo de DAÑOS"], label_visibility="collapsed")
         st.markdown("""<div class="sidebar-footer"><b>Taller de Chapa y Pintura CENOA Jujuy</b><br>Las Lomas 2227<br>San Salvador de Jujuy</div>""", unsafe_allow_html=True)
 
     # --------------------------------------------------------------------------------
@@ -274,7 +274,7 @@ try:
                         ),
                         yaxis=dict(
                             title="",
-                            showgrid=True,
+                            showgrid=True, # LÍNEAS HORIZONTALES POR VEHÍCULO
                             gridcolor='rgba(150, 150, 150, 0.4)',
                             gridwidth=1,
                             griddash='dot'
@@ -353,7 +353,7 @@ try:
                             # Filtramos los registros solo de este bloque
                             df_b = df_veh_det[df_veh_det['Bloque'] == b].copy()
                             
-                            # Sumamos el tiempo (debe ser igual a lo graficado en la barra de color)
+                            # Sumamos el tiempo
                             total_horas_bloque = df_b['Dif (2)'].sum()
                             
                             st.markdown(f"**{b}**")
@@ -369,7 +369,7 @@ try:
                             
                             # Totalizador al pie de la tabla
                             st.caption(f"⏱️ Suma total de horas reales trabajadas en {b}: **{format_hours(total_horas_bloque)}**")
-                            st.write("---") # Pequeño separador entre tablas
+                            st.write("---") 
 
                     else:
                         st.info("No hay datos calculados para el vehículo seleccionado.")
@@ -382,93 +382,6 @@ try:
 
         else:
             st.info(f"No hay datos cargados para {mes_sel}.")
-
-    # --------------------------------------------------------------------------------
-    # 5. SUBMENÚ: PRODUCTIVIDAD DE OPERARIOS
-    # --------------------------------------------------------------------------------
-    elif opcion == "👨‍🔧 Productividad de Operarios":
-        st.title("👨‍🔧 Auditoría y Productividad de Operarios")
-        
-        col_filtro1, col_filtro2 = st.columns(2)
-        with col_filtro1:
-            mes_op = st.selectbox("Mes:", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], key="mes_op")
-        with col_filtro2:
-            tipo_dano_op = st.selectbox("Tipo de Daño a auditar:", ["A", "B", "C"], key="dano_op")
-        
-        if mes_op == "Enero":
-            df_op_filtrado = df[(df['Tipo Limpio'] == tipo_dano_op) & (df['Bloque'] != "OTRO / NO CLASIFICADO")]
-            
-            if not df_op_filtrado.empty:
-                st.divider()
-                st.subheader(f"Matriz de Eficiencia - DAÑO {tipo_dano_op}")
-                
-                bloque_sel = st.selectbox("Seleccione Fase Técnica para analizar al personal:", list(MAPEO_BLOQUES.keys()))
-                df_bloque = df_op_filtrado[df_op_filtrado['Bloque'] == bloque_sel]
-                
-                if not df_bloque.empty:
-                    avg_ref = df_bloque['Dif (2)'].mean()
-                    
-                    df_ranking = df_bloque.groupby('Operario').agg(
-                        Tiempo_Promedio=('Dif (2)', 'mean'),
-                        Vehiculos=('Ref.OR', 'nunique')
-                    ).reset_index()
-                    
-                    panos_reales = df_bloque.groupby(['Operario', 'Ref.OR'])['PAÑOS'].first().groupby('Operario').sum().reset_index()
-                    df_ranking = df_ranking.merge(panos_reales, on='Operario', how='left')
-                    
-                    df_ranking['Estado'] = df_ranking['Tiempo_Promedio'].apply(lambda x: '⚠️ Lento' if x > avg_ref else '✅ Rápido/Eficiente')
-                    df_ranking['Tiempo (H:M)'] = df_ranking['Tiempo_Promedio'].apply(format_hours)
-                    df_ranking = df_ranking.sort_values('Tiempo_Promedio', ascending=True)
-
-                    fig_ranking = px.bar(
-                        df_ranking, 
-                        x='Tiempo_Promedio', 
-                        y='Operario', 
-                        color='Estado',
-                        orientation='h',
-                        text='Tiempo (H:M)',
-                        hover_data={'Vehiculos': True, 'PAÑOS': True, 'Tiempo_Promedio': False},
-                        title=f"Desempeño en {bloque_sel} (Línea punteada = Promedio {format_hours(avg_ref)})",
-                        color_discrete_map={'✅ Rápido/Eficiente': '#00cc96', '⚠️ Lento': '#ef553b'}
-                    )
-                    fig_ranking.add_vline(x=avg_ref, line_dash="dash", line_color="black")
-                    fig_ranking.update_traces(textposition='inside')
-                    fig_ranking.update_layout(xaxis_title="Promedio en Horas", yaxis_title="")
-                    
-                    st.plotly_chart(fig_ranking, use_container_width=True)
-
-                    st.divider()
-                    st.subheader("🔎 Ficha Técnica de Operario (Deep Dive)")
-                    operario_sel = st.selectbox("Seleccione un técnico para auditar su volumen:", df_ranking['Operario'].tolist())
-                    
-                    datos_op = df_ranking[df_ranking['Operario'] == operario_sel].iloc[0]
-                    
-                    col_met1, col_met2, col_met3 = st.columns(3)
-                    col_met1.metric("Tiempo Promedio en la Fase", datos_op['Tiempo (H:M)'], delta="Por debajo del límite" if datos_op['Tiempo_Promedio'] <= avg_ref else "Excede límite", delta_color="inverse")
-                    col_met2.metric("Vehículos Intervenidos", int(datos_op['Vehiculos']))
-                    col_met3.metric("Volumen (Paños Trabajados)", int(datos_op['PAÑOS']) if pd.notnull(datos_op['PAÑOS']) else 0)
-                    
-                    st.divider()
-                    st.subheader("🚗 Auditoría de Patentes Críticas (Responsabilidad)")
-                    st.write(f"Casos donde **{operario_sel}** superó el tiempo promedio esperado de **{format_hours(avg_ref)}** en **{bloque_sel}**.")
-                    
-                    df_lentos_op = df_bloque[(df_bloque['Operario'] == operario_sel) & (df_bloque['Dif (2)'] > avg_ref)].sort_values(by='Dif (2)', ascending=False)
-                    
-                    if not df_lentos_op.empty:
-                        df_lentos_op['Tiempo Real (H:M)'] = df_lentos_op['Dif (2)'].apply(format_hours)
-                        df_lentos_op['Paños del Vehículo'] = df_lentos_op['PAÑOS'].fillna(0).astype(int)
-                        
-                        tabla_auditoria = df_lentos_op[['Patente', 'Ref.OR', 'Etapas', 'Paños del Vehículo', 'Tiempo Real (H:M)']].rename(columns={'Etapas': 'Actividad'})
-                        st.dataframe(tabla_auditoria, use_container_width=True, hide_index=True)
-                    else:
-                        st.success(f"Excelente: {operario_sel} no tiene vehículos críticos en esta fase para el Daño {tipo_dano_op}.")
-                        
-                else:
-                    st.warning(f"No hay registros técnicos para la fase '{bloque_sel}' en Daño {tipo_dano_op}.")
-            else:
-                st.warning(f"No hay registros del Daño {tipo_dano_op} en este mes.")
-        else:
-            st.info(f"No hay datos de operarios cargados para el mes de {mes_op}.")
 
 except Exception as e:
     st.error(f"Error general en el sistema: {e}")
