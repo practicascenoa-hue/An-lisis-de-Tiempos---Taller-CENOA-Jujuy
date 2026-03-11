@@ -216,7 +216,7 @@ try:
                 - **LAVADO:** LAVADO - PULIDO Y LAVADO - LUSTRADO Y LAVADO - LIJADO, PULIDO Y LAVADO - LIJADO, PULIDO Y LUSTRADO DE PIEZAS PINTADA JUNTO CON LAVADO
                 - **ENTREGA:** TERMINACIONES - LIMPIEZA
                 
-                **Nota de lectura:** El eje horizontal representa los días laborables del mes. Cada día contiene una capacidad de **9 horas netas**. Las barras de colores muestran el tiempo real agrupado por bloque en ese día. El espacio sobrante para completar las 9 horas se grafica en gris como **Mudas de trabajo**. *Puedes desplazar el gráfico horizontalmente o hacer zoom para ver el mes completo con detalle.*
+                **Nota de lectura:** El eje horizontal representa los días laborables del mes. Cada día contiene una capacidad de **9 horas netas**. Las barras de colores muestran el tiempo real agrupado por bloque en ese día. El espacio sobrante para completar las 9 horas se grafica en gris como **Mudas de trabajo**. *El vehículo no acumula mudas al finalizar su última actividad en el taller.*
                 """)
 
                 df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '') & (df_final['Day'].notna())].copy()
@@ -237,6 +237,7 @@ try:
                             base_x = day_start_x[current_day]
                             
                             df_day = df_veh[df_veh['Day'] == current_day]
+                            is_last_day = (idx == max_day_idx)
                             
                             if df_day.empty:
                                 plot_data.append({
@@ -271,7 +272,8 @@ try:
                                         total_worked_today += dur
                                 
                                 muda = 9.0 - total_worked_today
-                                if muda > 0.01: 
+                                # LÓGICA CORREGIDA: Si es el último día, NO dibujamos la muda remanente.
+                                if muda > 0.01 and not is_last_day: 
                                     plot_data.append({
                                         'Patente': patente,
                                         'Bloque': '⏳ Mudas de trabajo',
@@ -411,7 +413,6 @@ try:
                                 
                                 st.markdown(f"**{b}**")
                                 
-                                # Le añadí la columna 'Fecha' para que sepas en qué día exacto del calendario ocurrió
                                 df_show = df_b[['Fecha', 'Operario', 'Etapas', 'Dif (2)']].copy()
                                 df_show['Duración'] = df_show['Dif (2)'].apply(format_hours)
                                 df_show = df_show[['Fecha', 'Operario', 'Etapas', 'Duración']]
