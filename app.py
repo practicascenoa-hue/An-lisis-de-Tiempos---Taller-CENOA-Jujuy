@@ -216,7 +216,7 @@ try:
                 - **LAVADO:** LAVADO - PULIDO Y LAVADO - LUSTRADO Y LAVADO - LIJADO, PULIDO Y LAVADO - LIJADO, PULIDO Y LUSTRADO DE PIEZAS PINTADA JUNTO CON LAVADO
                 - **ENTREGA:** TERMINACIONES - LIMPIEZA
                 
-                **Nota de lectura:** El eje horizontal representa los días laborables del mes. Cada día contiene una capacidad de **9 horas netas**. Las barras de colores muestran el tiempo real agrupado por bloque en ese día. El espacio sobrante para completar las 9 horas se grafica en gris como **Mudas de trabajo**. *El vehículo no acumula mudas al finalizar su última actividad en el taller.*
+                **Nota de lectura:** El eje horizontal representa los días laborables del mes. Cada día contiene una capacidad de **9 horas netas**. Las barras de colores muestran el tiempo real agrupado por bloque en ese día. El espacio sobrante para completar las 9 horas se grafica en gris como **Mudas de trabajo**. *Excepción lógica:* El vehículo no acumula mudas al finalizar su última actividad antes de su entrega.
                 """)
 
                 df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '') & (df_final['Day'].notna())].copy()
@@ -237,6 +237,8 @@ try:
                             base_x = day_start_x[current_day]
                             
                             df_day = df_veh[df_veh['Day'] == current_day]
+                            
+                            # Validar si este es el último día en que el vehículo estuvo en el taller
                             is_last_day = (idx == max_day_idx)
                             
                             if df_day.empty:
@@ -272,7 +274,8 @@ try:
                                         total_worked_today += dur
                                 
                                 muda = 9.0 - total_worked_today
-                                # LÓGICA CORREGIDA: Si es el último día, NO dibujamos la muda remanente.
+                                # LÓGICA EXPERTA: Si sobra tiempo (> 0.01) pero NO es el último día, graficar MUDA.
+                                # Si ES el último día, simplemente no se dibuja la MUDA porque el trabajo finalizó.
                                 if muda > 0.01 and not is_last_day: 
                                     plot_data.append({
                                         'Patente': patente,
@@ -286,6 +289,10 @@ try:
                     df_plot = pd.DataFrame(plot_data)
                     
                     if not df_plot.empty:
+                        # Cálculos globales para el panel lateral de "Resumen"
+                        total_real_global = df_plot[df_plot['Bloque'] != '⏳ Mudas de trabajo']['Duracion'].sum()
+                        total_muda_global = df_plot[df_plot['Bloque'] == '⏳ Mudas de trabajo']['Duracion'].sum()
+
                         orden_patentes_df = df_plot.groupby('Patente')['Base_Inicio'].min().sort_values(ascending=False).index
                         
                         color_map = {'⏳ Mudas de trabajo': '#e0e0e0'} 
@@ -297,7 +304,6 @@ try:
                         tick_vals = [day_start_x[d] for d in DIAS_VALIDOS]
                         tick_texts = [f"{d:02d}/01" for d in DIAS_VALIDOS]
 
-                        # 1. GRÁFICO GENERAL
                         fig = px.bar(
                             df_plot,
                             x='Duracion',
@@ -313,7 +319,9 @@ try:
                             color_discrete_map=color_map
                         )
 
+                        # Configuramos el layout con un ancho fijo de 1600px para forzar el scroll horizontal
                         fig.update_layout(
+                            width=1600,
                             height=max(500, len(orden_patentes_df) * 60), 
                             showlegend=True,
                             legend_title="Actividades",
@@ -338,7 +346,21 @@ try:
                             fig.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
 
                         fig.update_traces(textposition='auto', textfont_size=10)
-                        st.plotly_chart(fig, use_container_width=False, theme=None)
+                        
+                        # --- DIVISIÓN EN COLUMNAS PARA EL GRÁFICO PRINCIPAL ---
+                        # Col_kpi para los datos globales al lado del eje Y. Col_chart para el gráfico.
+                        col_kpi, col_chart = st.columns([1.5, 8.5])
+                        
+                        with col_kpi:
+                            st.markdown("<div style='margin-top: 80px;'></div>", unsafe_allow_html=True)
+                            st.markdown(f"### 📊 Total global")
+                            st.write(f"Para el Daño {tipo}")
+                            st.metric("Horas Trabajadas", format_hours(total_real_global))
+                            st.metric("Mudas Totales", format_hours(total_muda_global))
+                            
+                        with col_chart:
+                            # use_container_width=False obliga a Streamlit a respetar los 1600px de ancho y crea el scroll
+                            st.plotly_chart(fig, use_container_width=False, theme=None)
                         
                         # --------------------------------------------------------------------------------
                         # 2. DETALLE INDIVIDUAL Y TABLAS DESGLOSADAS
@@ -368,6 +390,7 @@ try:
                             )
                             
                             fig_ind.update_layout(
+                                width=1600, # Mantener la misma escala que el gráfico general superior
                                 height=200, 
                                 showlegend=True,
                                 legend_title="Actividades",
@@ -377,7 +400,7 @@ try:
                                     ticktext=tick_texts,
                                     title="Días Laborables",
                                     gridcolor='rgba(200, 200, 200, 0.4)',
-                                    range=[0, len(DIAS_VALIDOS) * 9] # Mismo zoom que el calendario superior
+                                    range=[0, len(DIAS_VALIDOS) * 9]
                                 ),
                                 yaxis=dict(title="")
                             )
@@ -386,10 +409,12 @@ try:
                                 fig_ind.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
 
                             fig_ind.update_traces(textposition='auto', textfont_size=11)
+                            
+                            # Lo encapsulamos también para el scroll
                             st.plotly_chart(fig_ind, use_container_width=False, theme=None)
 
                             # --- CUADRO DE RESUMEN DEL VEHÍCULO ---
-                            st.markdown(f"### Resumen")
+                            st.markdown(f"### Resumen de Patente")
                             col_res1, col_res2 = st.columns(2)
                             
                             total_real_veh = df_plot_ind[df_plot_ind['Bloque'] != '⏳ Mudas de trabajo']['Duracion'].sum()
