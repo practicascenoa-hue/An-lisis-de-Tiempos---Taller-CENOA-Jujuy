@@ -175,7 +175,7 @@ try:
         c2.metric("Operarios de planta", 12)
 
     # --------------------------------------------------------------------------------
-    # 5. SUBMENÚ: ANÁLISIS TIPO DE DAÑOS (CÓDIGO 2)
+    # 5. SUBMENÚ: ANÁLISIS TIPO DE DAÑOS
     # --------------------------------------------------------------------------------
     elif opcion == "📈 Análisis tipo de DAÑOS":
         st.title("📈 Análisis tipo de DAÑOS")
@@ -226,7 +226,6 @@ try:
                     
                     for patente, df_veh in df_vehiculos.groupby('Patente'):
                         dias_activos = df_veh['Day'].unique()
-                        
                         dias_activos = [d for d in dias_activos if d in DIAS_VALIDOS]
                         if not dias_activos: continue
                         
@@ -259,27 +258,26 @@ try:
                                 for _, row in day_grouped.iterrows():
                                     dur = row['Dif (2)']
                                     if dur > 0:
-                                        # Mostramos siempre todas las barras y sus textos
+                                        texto_mostrar = f"{dur:.2f}h ({format_hours(dur)})" if dur > 0.5 else ""
                                         plot_data.append({
                                             'Patente': patente,
                                             'Bloque': row['Bloque'],
                                             'Duracion': dur,
                                             'Base_Inicio': current_x,
-                                            'Texto': f"{dur:.2f}h ({format_hours(dur)})",
+                                            'Texto': texto_mostrar,
                                             'Orden_Bloque': row['Orden_Bloque']
                                         })
                                         current_x += dur
                                         total_worked_today += dur
                                 
                                 muda = 9.0 - total_worked_today
-                                # Mantenemos > 0.01 solo para evitar dibujar basurita matemática de 0.0001
                                 if muda > 0.01: 
                                     plot_data.append({
                                         'Patente': patente,
                                         'Bloque': '⏳ Mudas de trabajo',
                                         'Duracion': muda,
                                         'Base_Inicio': current_x,
-                                        'Texto': f"{muda:.2f}h ({format_hours(muda)})",
+                                        'Texto': f"{muda:.2f}h ({format_hours(muda)})" if muda > 1 else "", 
                                         'Orden_Bloque': 99
                                     })
 
@@ -297,6 +295,7 @@ try:
                         tick_vals = [day_start_x[d] for d in DIAS_VALIDOS]
                         tick_texts = [f"{d:02d}/01" for d in DIAS_VALIDOS]
 
+                        # 1. GRÁFICO GENERAL
                         fig = px.bar(
                             df_plot,
                             x='Duracion',
@@ -337,9 +336,94 @@ try:
                             fig.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
 
                         fig.update_traces(textposition='auto', textfont_size=10)
-                        
                         st.plotly_chart(fig, use_container_width=False, theme=None)
                         
+                        # --------------------------------------------------------------------------------
+                        # 2. DETALLE INDIVIDUAL Y TABLAS DESGLOSADAS
+                        # --------------------------------------------------------------------------------
+                        st.divider()
+                        st.subheader("🔎 Detalle del Diagrama para cada vehículo")
+                        st.write("Selecciona una patente para aislar su línea de tiempo en el calendario y ver el desglose de operarios y actividades.")
+                        
+                        vehiculo_sel = st.selectbox("Seleccione un vehículo (Patente):", sorted(df_vehiculos['Patente'].unique()))
+                        
+                        df_plot_ind = df_plot[df_plot['Patente'] == vehiculo_sel]
+                        
+                        if not df_plot_ind.empty:
+                            # --- GRÁFICO AISLADO ---
+                            fig_ind = px.bar(
+                                df_plot_ind,
+                                x='Duracion',
+                                y='Patente',
+                                base='Base_Inicio',
+                                color='Bloque',
+                                orientation='h',
+                                text='Texto',
+                                title=f"Línea de Vida - Vehículo: {vehiculo_sel}",
+                                labels={'Duracion': 'Horas', 'Patente': 'Patente'},
+                                hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden_Bloque': False},
+                                color_discrete_map=color_map
+                            )
+                            
+                            fig_ind.update_layout(
+                                height=200, 
+                                showlegend=True,
+                                legend_title="Actividades",
+                                xaxis=dict(
+                                    tickmode='array',
+                                    tickvals=tick_vals,
+                                    ticktext=tick_texts,
+                                    title="Días Laborables",
+                                    gridcolor='rgba(200, 200, 200, 0.4)',
+                                    range=[0, len(DIAS_VALIDOS) * 9] # Mismo zoom que el calendario superior
+                                ),
+                                yaxis=dict(title="")
+                            )
+
+                            for val in tick_vals:
+                                fig_ind.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
+
+                            fig_ind.update_traces(textposition='auto', textfont_size=11)
+                            st.plotly_chart(fig_ind, use_container_width=False, theme=None)
+
+                            # --- CUADRO DE RESUMEN DEL VEHÍCULO ---
+                            st.markdown(f"### Resumen")
+                            col_res1, col_res2 = st.columns(2)
+                            
+                            total_real_veh = df_plot_ind[df_plot_ind['Bloque'] != '⏳ Mudas de trabajo']['Duracion'].sum()
+                            total_mudas_veh = df_plot_ind[df_plot_ind['Bloque'] == '⏳ Mudas de trabajo']['Duracion'].sum()
+                            
+                            col_res1.metric("Tiempo Total Utilizado (Trabajo Real)", format_hours(total_real_veh))
+                            col_res2.metric("Tiempo Total de Mudas de Trabajo", format_hours(total_mudas_veh))
+                            
+                            # --- DETALLE OPERATIVO (TABLAS) ---
+                            st.markdown(f"### 📋 Detalle Operativo: {vehiculo_sel}")
+                            
+                            df_veh_det = df_vehiculos[df_vehiculos['Patente'] == vehiculo_sel].copy()
+                            df_veh_det['Orden'] = df_veh_det['Bloque'].str.extract(r'(\d+)').astype(int)
+                            df_veh_det = df_veh_det.sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
+                            
+                            bloques_presentes = df_veh_det['Bloque'].unique()
+                            
+                            for b in bloques_presentes:
+                                df_b = df_veh_det[df_veh_det['Bloque'] == b].copy()
+                                total_horas_bloque = df_b['Dif (2)'].sum()
+                                
+                                st.markdown(f"**{b}**")
+                                
+                                # Le añadí la columna 'Fecha' para que sepas en qué día exacto del calendario ocurrió
+                                df_show = df_b[['Fecha', 'Operario', 'Etapas', 'Dif (2)']].copy()
+                                df_show['Duración'] = df_show['Dif (2)'].apply(format_hours)
+                                df_show = df_show[['Fecha', 'Operario', 'Etapas', 'Duración']]
+                                df_show.rename(columns={'Etapas': 'Actividad Específica'}, inplace=True)
+                                
+                                st.dataframe(df_show, hide_index=True, use_container_width=True)
+                                st.caption(f"⏱️ Suma total de horas reales trabajadas en {b}: **{format_hours(total_horas_bloque)}**")
+                                st.write("---") 
+
+                        else:
+                            st.info("No hay datos calculados para el vehículo seleccionado.")
+
                     else:
                         st.info("No se pudo construir el calendario. Verifique los datos generados.")
                 else:
