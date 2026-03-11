@@ -216,7 +216,7 @@ try:
                 - **LAVADO:** LAVADO - PULIDO Y LAVADO - LUSTRADO Y LAVADO - LIJADO, PULIDO Y LAVADO - LIJADO, PULIDO Y LUSTRADO DE PIEZAS PINTADA JUNTO CON LAVADO
                 - **ENTREGA:** TERMINACIONES - LIMPIEZA
                 
-                **Nota de lectura:** El eje horizontal representa los días laborables del mes. Cada día contiene una capacidad de **9 horas netas**. Las barras de colores muestran el tiempo real agrupado por bloque en ese día. El espacio sobrante para completar las 9 horas se grafica en gris como **Mudas de trabajo**. *Puedes desplazar el gráfico horizontalmente para ver el mes completo con detalle.*
+                **Nota de lectura:** El eje horizontal representa los días laborables del mes. Cada día contiene una capacidad de **9 horas netas**. Las barras de colores muestran el tiempo real agrupado por bloque en ese día. El espacio sobrante para completar las 9 horas se grafica en gris como **Mudas de trabajo**. *Puedes desplazar el gráfico horizontalmente o hacer zoom para ver el mes completo con detalle.*
                 """)
 
                 df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '') & (df_final['Day'].notna())].copy()
@@ -259,29 +259,27 @@ try:
                                 for _, row in day_grouped.iterrows():
                                     dur = row['Dif (2)']
                                     if dur > 0:
-                                        # MEJORA: Solo mostrar texto en barras productivas si duran más de 30 min (0.5h) para no ensuciar,
-                                        # pero la barra siempre se dibuja.
-                                        texto_mostrar = f"{dur:.2f}h ({format_hours(dur)})" if dur > 0.5 else ""
+                                        # Mostramos siempre todas las barras y sus textos
                                         plot_data.append({
                                             'Patente': patente,
                                             'Bloque': row['Bloque'],
                                             'Duracion': dur,
                                             'Base_Inicio': current_x,
-                                            'Texto': texto_mostrar,
+                                            'Texto': f"{dur:.2f}h ({format_hours(dur)})",
                                             'Orden_Bloque': row['Orden_Bloque']
                                         })
                                         current_x += dur
                                         total_worked_today += dur
                                 
                                 muda = 9.0 - total_worked_today
-                                # MEJORA: Solo dibujar mudas si son mayores a 30 minutos (0.5 horas) para limpiar ruido visual
-                                if muda > 0.5: 
+                                # Mantenemos > 0.01 solo para evitar dibujar basurita matemática de 0.0001
+                                if muda > 0.01: 
                                     plot_data.append({
                                         'Patente': patente,
                                         'Bloque': '⏳ Mudas de trabajo',
                                         'Duracion': muda,
                                         'Base_Inicio': current_x,
-                                        'Texto': f"{muda:.2f}h ({format_hours(muda)})" if muda > 1 else "", # Texto solo si muda > 1 hora
+                                        'Texto': f"{muda:.2f}h ({format_hours(muda)})",
                                         'Orden_Bloque': 99
                                     })
 
@@ -315,7 +313,6 @@ try:
                         )
 
                         fig.update_layout(
-                            # Aumentamos el alto para que haya más espacio entre autos
                             height=max(500, len(orden_patentes_df) * 60), 
                             showlegend=True,
                             legend_title="Actividades",
@@ -325,7 +322,7 @@ try:
                                 ticktext=tick_texts,
                                 title="Días Laborables",
                                 gridcolor='rgba(200, 200, 200, 0.4)',
-                                # Aumentar el zoom inicial obligando a hacer scroll horizontal en pantalla
+                                range=[0, len(DIAS_VALIDOS) * 9]
                             ),
                             yaxis=dict(
                                 title="",
@@ -336,10 +333,12 @@ try:
                             )
                         )
 
-                        # Forzar scroll horizontal en la vista (Streamlit container)
+                        for val in tick_vals:
+                            fig.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
+
+                        fig.update_traces(textposition='auto', textfont_size=10)
+                        
                         st.plotly_chart(fig, use_container_width=False, theme=None)
-                        # Nota: Al poner use_container_width=False, Plotly usa su propio motor de zoom.
-                        # Puedes hacer "Pan" (arrastrar) sobre el gráfico para moverte por los días.
                         
                     else:
                         st.info("No se pudo construir el calendario. Verifique los datos generados.")
