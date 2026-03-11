@@ -12,6 +12,7 @@ st.markdown("""
     <style>
     .main { background-color: #f4f6f9; }
     .stMetric { background-color: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #e1e4e8; box-shadow: 2px 2px 10px rgba(0,0,0,0.05); }
+    div[data-testid="stMetricValue"] { font-size: 22px !important; } /* Ajuste global para que los números de los KPI sean más pequeños y finos */
     div[data-testid="column"] > button { width: 100%; height: 50px; font-weight: bold; border-radius: 8px; border: 2px solid #002366; color: #002366; transition: all 0.3s; }
     div[data-testid="column"] > button:hover { background-color: #002366; color: #ffffff; transform: scale(1.02); }
     div[data-testid="column"] > button:active { transform: scale(0.98); }
@@ -346,17 +347,12 @@ try:
                         with col_kpi:
                             st.markdown("<div style='margin-top: 80px;'></div>", unsafe_allow_html=True)
                             
-                            # 1. ARREGLO DE LETRAS: Usamos markeddown para formatear como ### (estilo azul corporate)
                             st.markdown(f"### 📊 Total global")
                             st.write(f"Para el Daño {tipo}")
                             
-                            # Formateamos valores
-                            val_real_fmt = format_hours(total_real_global)
-                            val_muda_fmt = format_hours(total_muda_global)
-                            
-                            # 2. REDUCCIÓN DE TAMAÑO: Usamos HTML dentro de metric para forzar font-size: 24px (más fino)
-                            st.metric(label="Horas Trabajadas", value=f"<span style='font-size: 24px;'>{val_real_fmt}</span>")
-                            st.metric(label="Mudas Totales", value=f"<span style='font-size: 24px;'>{val_muda_fmt}</span>")
+                            # Retiramos el HTML interno del valor, ahora lo maneja el CSS global
+                            st.metric(label="Horas Trabajadas", value=format_hours(total_real_global))
+                            st.metric(label="Mudas Totales", value=format_hours(total_muda_global))
                             
                         with col_chart:
                             st.plotly_chart(fig, use_container_width=False, theme=None)
@@ -418,19 +414,16 @@ try:
                             total_real_veh = df_plot_ind[df_plot_ind['Bloque'] != '⏳ Mudas de trabajo']['Duracion'].sum()
                             total_mudas_veh = df_plot_ind[df_plot_ind['Bloque'] == '⏳ Mudas de trabajo']['Duracion'].sum()
                             
-                            # MEJORA VISUAL: También aplico la reducción de tamaño aquí para mantener coherencia
-                            val_real_veh_fmt = format_hours(total_real_veh)
-                            val_muda_veh_fmt = format_hours(total_mudas_veh)
-                            
-                            col_res1.metric(label="Tiempo Total Utilizado (Trabajo Real)", value=f"<span style='font-size: 24px;'>{val_real_veh_fmt}</span>")
-                            col_res2.metric(label="Tiempo Total de Mudas de Trabajo", value=f"<span style='font-size: 24px;'>{val_muda_veh_fmt}</span>")
+                            # Retiramos el HTML interno también aquí
+                            col_res1.metric(label="Tiempo Total Utilizado (Trabajo Real)", value=format_hours(total_real_veh))
+                            col_res2.metric(label="Tiempo Total de Mudas de Trabajo", value=format_hours(total_mudas_veh))
                             
                             # --- DETALLE OPERATIVO (TABLAS) ---
                             st.markdown(f"### 📋 Detalle Operativo: {vehiculo_sel}")
                             
                             df_veh_det = df_vehiculos[df_vehiculos['Patente'] == vehiculo_sel].copy()
                             df_veh_det['Orden'] = df_veh_det['Bloque'].str.extract(r'(\d+)').astype(int)
-                            df_veh_det = df_vehiculos[df_vehiculos['Patente'] == vehiculo_sel].sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
+                            df_veh_det = df_veh_det.sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
                             
                             bloques_presentes = df_veh_det['Bloque'].unique()
                             
