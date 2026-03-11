@@ -28,20 +28,30 @@ def format_hours(decimal_hours):
     if minutes == 60: hours += 1; minutes = 0
     return f"{hours}h {minutes:02d}m"
 
-# Función robusta para extraer el DÍA del mes de la columna "Entra (2)"
+# Función robusta para extraer el DÍA del mes de la columna "Fecha"
 def extract_day(val):
     try:
-        val_str = str(val).strip().upper()
-        if val_str in ['NAN', 'NAT', 'NULL', 'NONE', '']: return None
-        # Si el formato es "02/01/2026 10:40"
+        val_str = str(val).strip()
+        if val_str.upper() in ['NAN', 'NAT', 'NULL', 'NONE', '']: return None
+        
+        # Intenta parsear directamente con pandas (maneja múltiples formatos)
+        dt = pd.to_datetime(val_str, errors='coerce', dayfirst=True)
+        if pd.notna(dt): return dt.day
+            
+        # Si pandas falla, intentamos heurísticas de corte manual
         if '/' in val_str:
             return int(val_str.split('/')[0])
-        # Si el formato es "2026-01-02 10:40:00"
-        if '-' in val_str:
+        elif '-' in val_str:
             parts = val_str.split(' ')[0].split('-')
-            if len(parts[0]) == 4: return int(parts[2])
-            return int(parts[0])
-        return None
+            return int(parts[2]) if len(parts[0]) == 4 else int(parts[0])
+            
+        # Si Excel lo exportó como número serial
+        val_float = float(val_str)
+        if val_float > 40000:
+            dt = pd.to_datetime('1899-12-30') + pd.to_timedelta(val_float, 'D')
+            return dt.day
+        else:
+            return int(val_float)
     except:
         return None
 
@@ -57,17 +67,49 @@ def load_data():
         df = pd.read_csv(io.StringIO(response.text))
         
         df.columns = df.columns.str.strip()
+        
+        # Normalización de nombres de columnas
         if 'Tipo de Daño' not in df.columns:
             cols = [c for c in df.columns if 'daño' in c.lower() or 'dano' in c.lower()]
             if cols: df.rename(columns={cols[0]: 'Tipo de Daño'}, inplace=True)
             
-        # Extraer el Día
-        df['Day'] = df['Entra (2)'].apply(extract_day)
+        if 'Fecha' not in df.columns:
+            cols_fecha = [c for c in df.columns if 'fech' in c.lower()]
+            if cols_fecha: df.rename(columns={cols_fecha[0]: 'Fecha'}, inplace=True)
+            else: df['Fecha'] = ''
 
-        # Usar directamente la columna 'Dif (2)' original del Excel 
-        # (ya que ahora filtramos y encapsulamos por días de 9hs, la suma dará exacto)
-        df['Dif (2)'] = pd.to_numeric(df['Dif (2)'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+        # Extracción del Día
+        df['Day'] = df['Fecha'].apply(extract_day)
+            
+        # NUEVO MOTOR DE CÁLCULO DE HORAS (Suma horas puras entre Entra y Salid)
+        def parse_time(val):
+            val = str(val).strip().upper()
+            if val in ['', 'NAN', 'NAT', 'NULL', 'NONE']: return None
+            if ' ' in val: 
+                val = val.split(' ')[-1]
+            try:
+                parts = val.split(':')
+                if len(parts) >= 2:
+                    return float(parts[0]) + float(parts[1])/60.0
+                return float(val)
+            except:
+                return None
+
+        def calc_diff(row):
+            en = parse_time(row.get('Entra (2)'))
+            sa = parse_time(row.get('Salid (2)'))
+            if en is not None and sa is not None:
+                d = sa - en
+                return d + 24.0 if d < 0 else d
+            try:
+                val = str(row.get('Dif (2)', 0)).replace(',', '.')
+                return float(val) if pd.notna(float(val)) else 0.0
+            except:
+                return 0.0
+
+        df['Dif (2)'] = df.apply(calc_diff, axis=1)
         
+        # Limpieza general
         df['PAÑOS'] = pd.to_numeric(df['PAÑOS'], errors='coerce')
         df['Operario'] = df['Operario'].astype(str).str.upper().str.strip()
         df['Etapas'] = df['Etapas'].astype(str).str.upper().str.strip()
@@ -187,7 +229,7 @@ try:
                 **Nota de lectura:** El eje horizontal representa los días laborables del mes. Cada día contiene una capacidad de **9 horas netas**. Las barras de colores muestran el tiempo real agrupado por bloque en ese día. El espacio sobrante para completar las 9 horas se grafica en gris como **Mudas de trabajo**.
                 """)
 
-                # Filtrar vehículos con patente válida y fecha parseable
+                # Filtrar vehículos con patente válida y que tengan el día correctamente extraído
                 df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '') & (df_final['Day'].notna())].copy()
 
                 if not df_vehiculos.empty:
@@ -195,18 +237,17 @@ try:
                     
                     # Agrupar por Patente para procesar auto por auto
                     for patente, df_veh in df_vehiculos.groupby('Patente'):
-                        # Extraer los días en los que este auto tuvo actividad
                         dias_activos = df_veh['Day'].unique()
                         
                         # Filtramos solo los días que caen en nuestro calendario oficial
                         dias_activos = [d for d in dias_activos if d in DIAS_VALIDOS]
                         if not dias_activos: continue
                         
-                        # Determinar el rango de estadía del vehículo en el taller
+                        # Determinar el rango de estadía del vehículo (desde que se tocó por primera vez hasta la última)
                         min_day_idx = min([DIAS_VALIDOS.index(d) for d in dias_activos])
                         max_day_idx = max([DIAS_VALIDOS.index(d) for d in dias_activos])
                         
-                        # Iteramos día por día desde que entró hasta que salió
+                        # Iteramos día por día como si fuera un calendario
                         for idx in range(min_day_idx, max_day_idx + 1):
                             current_day = DIAS_VALIDOS[idx]
                             base_x = day_start_x[current_day]
@@ -214,7 +255,7 @@ try:
                             df_day = df_veh[df_veh['Day'] == current_day]
                             
                             if df_day.empty:
-                                # Día completo sin tocar el auto = 9 Horas de Muda
+                                # Si el auto estuvo en el taller pero ese día no se tocó, es un día entero de Muda (9hs)
                                 plot_data.append({
                                     'Patente': patente,
                                     'Bloque': '⏳ Mudas de trabajo',
@@ -224,7 +265,7 @@ try:
                                     'Orden_Bloque': 99
                                 })
                             else:
-                                # Agrupamos las actividades de ese mismo día por Bloque
+                                # Agrupamos las actividades de ese mismo día sumando sus horas
                                 day_grouped = df_day.groupby('Bloque')['Dif (2)'].sum().reset_index()
                                 day_grouped['Orden_Bloque'] = day_grouped['Bloque'].str.extract(r'(\d+)').astype(int)
                                 day_grouped = day_grouped.sort_values('Orden_Bloque')
@@ -232,7 +273,7 @@ try:
                                 current_x = base_x
                                 total_worked_today = 0
                                 
-                                # Graficamos las barras a color
+                                # Graficamos las barras a color del trabajo real
                                 for _, row in day_grouped.iterrows():
                                     dur = row['Dif (2)']
                                     if dur > 0:
@@ -247,9 +288,9 @@ try:
                                         current_x += dur
                                         total_worked_today += dur
                                 
-                                # Las horas que faltan para llegar a 9 se marcan como Muda
+                                # Si sobró tiempo en el día (trabajaron menos de 9hs en ese auto), rellenamos con Muda
                                 muda = 9.0 - total_worked_today
-                                if muda > 0.05: # Ignoramos remanentes menores a 3 minutos
+                                if muda > 0.05: 
                                     plot_data.append({
                                         'Patente': patente,
                                         'Bloque': '⏳ Mudas de trabajo',
@@ -258,13 +299,14 @@ try:
                                         'Texto': f"{muda:.2f}h ({format_hours(muda)})",
                                         'Orden_Bloque': 99
                                     })
+                                # Nota: Si total_worked_today > 9.0 (Ej. 2 personas trabajaron simultáneamente), 
+                                # la barra simplemente se extenderá visualmente, demostrando el sobre-esfuerzo de ese día.
 
                     # Construir DataFrame final
                     df_plot = pd.DataFrame(plot_data)
                     
                     if not df_plot.empty:
-                        # Ordenar el eje Y (Patentes) según qué auto entró primero
-                        # Primero ordenamos por el inicio más temprano, luego por patente
+                        # Ordenar el eje Y (Patentes) colocando arriba los que ingresaron primero en el mes
                         orden_patentes_df = df_plot.groupby('Patente')['Base_Inicio'].min().sort_values(ascending=False).index
                         
                         # Paleta de Colores
@@ -274,7 +316,7 @@ try:
                         for i, b in enumerate(orden_bloques):
                             color_map[b] = colores_base[i % len(colores_base)]
 
-                        # Configuración de los "Ticks" o Marcas del Eje X
+                        # Configuración de las marcas del Calendario en el Eje X
                         tick_vals = [day_start_x[d] for d in DIAS_VALIDOS]
                         tick_texts = [f"{d:02d}/01" for d in DIAS_VALIDOS]
 
@@ -302,9 +344,9 @@ try:
                                 tickmode='array',
                                 tickvals=tick_vals,
                                 ticktext=tick_texts,
-                                title="Días Laborables (Cada tramo equivale a 9 horas netas)",
+                                title="Días Laborables (Cada separación vertical equivale a 9 horas netas)",
                                 gridcolor='rgba(200, 200, 200, 0.4)',
-                                range=[0, len(DIAS_VALIDOS) * 9] # Fija el ancho total del mes
+                                range=[0, len(DIAS_VALIDOS) * 9] # Ancho fijo para mostrar todo el mes
                             ),
                             yaxis=dict(
                                 title="",
@@ -315,7 +357,7 @@ try:
                             )
                         )
 
-                        # Líneas verticales que separan cada día (cada 9 horas)
+                        # Líneas verticales que separan el inicio de cada día
                         for val in tick_vals:
                             fig.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
 
@@ -323,7 +365,7 @@ try:
                         
                         st.plotly_chart(fig, use_container_width=True)
                     else:
-                        st.info("No se pudo construir el calendario. Verifique los formatos de fecha en la columna 'Entra (2)'.")
+                        st.info("No se pudo construir el calendario. Verifique los datos generados.")
                 else:
                     st.warning(f"No hay registros de patentes con fechas válidas para graficar el diagrama del Daño {tipo}.")
 
