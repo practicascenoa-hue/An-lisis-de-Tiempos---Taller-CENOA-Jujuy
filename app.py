@@ -257,7 +257,7 @@ try:
                                 for _, row in day_grouped.iterrows():
                                     dur = row['Dif (2)']
                                     if dur > 0:
-                                        # SIEMPRE generamos el texto para que esté disponible en el hover
+                                        # SIEMPRE generamos el texto para que Plotly lo tenga disponible para el Hover
                                         texto_mostrar = f"{dur:.2f}h ({format_hours(dur)})" 
                                         plot_data.append({
                                             'Patente': patente,
@@ -272,7 +272,7 @@ try:
                                 
                                 muda = 9.0 - total_worked_today
                                 if muda > 0.01 and not is_last_day: 
-                                    # SIEMPRE generamos el texto para la muda
+                                    # SIEMPRE generamos el texto de la muda
                                     plot_data.append({
                                         'Patente': patente,
                                         'Bloque': '⏳ Mudas de trabajo',
@@ -333,15 +333,15 @@ try:
                                 gridcolor='rgba(150, 150, 150, 0.4)',
                                 gridwidth=1,
                                 griddash='dot'
-                            ),
-                            hovermode="closest" # Fuerza a mostrar siempre el hover data más cercano
+                            )
                         )
 
                         for val in tick_vals:
                             fig.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
 
-                        # Forzamos a que el texto se muestre adentro, y si no entra, que NO lo esconda del Hover
-                        fig.update_traces(textposition='inside', insidetextfont=dict(color='black'), textfont_size=10, constraintext='none')
+                        # CORRECCIÓN AQUÍ: Volvemos al comportamiento inteligente por defecto de Plotly ('auto').
+                        # Oculta el texto si no entra, pero lo deja en el hover (al posar el ratón).
+                        fig.update_traces(textposition='auto', textfont_size=10)
                         
                         col_kpi, col_chart = st.columns([1.5, 8.5])
                         
@@ -394,14 +394,14 @@ try:
                                     gridcolor='rgba(200, 200, 200, 0.4)',
                                     range=[0, len(DIAS_VALIDOS) * 9] 
                                 ),
-                                yaxis=dict(title=""),
-                                hovermode="closest"
+                                yaxis=dict(title="")
                             )
 
                             for val in tick_vals:
                                 fig_ind.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
 
-                            fig_ind.update_traces(textposition='inside', insidetextfont=dict(color='black'), textfont_size=11, constraintext='none')
+                            # CORRECCIÓN AQUÍ: Volvemos a 'auto' también en el gráfico individual.
+                            fig_ind.update_traces(textposition='auto', textfont_size=11)
                             
                             st.plotly_chart(fig_ind, use_container_width=False, theme=None)
 
