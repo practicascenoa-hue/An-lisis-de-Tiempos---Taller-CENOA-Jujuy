@@ -216,7 +216,7 @@ try:
                 - **LAVADO:** LAVADO - PULIDO Y LAVADO - LUSTRADO Y LAVADO - LIJADO, PULIDO Y LAVADO - LIJADO, PULIDO Y LUSTRADO DE PIEZAS PINTADA JUNTO CON LAVADO
                 - **ENTREGA:** TERMINACIONES - LIMPIEZA
                 
-                **Nota de lectura:** El eje horizontal representa los días laborables del mes. Cada día contiene una capacidad de **9 horas netas**. Las barras de colores muestran el tiempo real agrupado por bloque en ese día. El espacio sobrante para completar las 9 horas se grafica en gris como **Mudas de trabajo**. *Excepción lógica:* El vehículo no acumula mudas al finalizar su última actividad antes de su entrega.
+                **Nota de lectura:** El eje horizontal representa los días laborables del mes. Cada día contiene una capacidad de **9 horas netas**. Las barras de colores muestran el tiempo real agrupado por bloque en ese día. El espacio sobrante para completar las 9 horas se grafica en gris como **Mudas de trabajo**. *El vehículo no acumula mudas al finalizar su última actividad en el taller.*
                 """)
 
                 df_vehiculos = df_final[(df_final['Patente'] != 'NAN') & (df_final['Patente'] != '') & (df_final['Day'].notna())].copy()
@@ -237,8 +237,6 @@ try:
                             base_x = day_start_x[current_day]
                             
                             df_day = df_veh[df_veh['Day'] == current_day]
-                            
-                            # Validar si este es el último día en que el vehículo estuvo en el taller
                             is_last_day = (idx == max_day_idx)
                             
                             if df_day.empty:
@@ -274,8 +272,6 @@ try:
                                         total_worked_today += dur
                                 
                                 muda = 9.0 - total_worked_today
-                                # LÓGICA EXPERTA: Si sobra tiempo (> 0.01) pero NO es el último día, graficar MUDA.
-                                # Si ES el último día, simplemente no se dibuja la MUDA porque el trabajo finalizó.
                                 if muda > 0.01 and not is_last_day: 
                                     plot_data.append({
                                         'Patente': patente,
@@ -289,7 +285,6 @@ try:
                     df_plot = pd.DataFrame(plot_data)
                     
                     if not df_plot.empty:
-                        # Cálculos globales para el panel lateral de "Resumen"
                         total_real_global = df_plot[df_plot['Bloque'] != '⏳ Mudas de trabajo']['Duracion'].sum()
                         total_muda_global = df_plot[df_plot['Bloque'] == '⏳ Mudas de trabajo']['Duracion'].sum()
 
@@ -319,7 +314,6 @@ try:
                             color_discrete_map=color_map
                         )
 
-                        # Configuramos el layout con un ancho fijo de 1600px para forzar el scroll horizontal
                         fig.update_layout(
                             width=1600,
                             height=max(500, len(orden_patentes_df) * 60), 
@@ -347,19 +341,24 @@ try:
 
                         fig.update_traces(textposition='auto', textfont_size=10)
                         
-                        # --- DIVISIÓN EN COLUMNAS PARA EL GRÁFICO PRINCIPAL ---
-                        # Col_kpi para los datos globales al lado del eje Y. Col_chart para el gráfico.
                         col_kpi, col_chart = st.columns([1.5, 8.5])
                         
                         with col_kpi:
                             st.markdown("<div style='margin-top: 80px;'></div>", unsafe_allow_html=True)
+                            
+                            # 1. ARREGLO DE LETRAS: Usamos markeddown para formatear como ### (estilo azul corporate)
                             st.markdown(f"### 📊 Total global")
                             st.write(f"Para el Daño {tipo}")
-                            st.metric("Horas Trabajadas", format_hours(total_real_global))
-                            st.metric("Mudas Totales", format_hours(total_muda_global))
+                            
+                            # Formateamos valores
+                            val_real_fmt = format_hours(total_real_global)
+                            val_muda_fmt = format_hours(total_muda_global)
+                            
+                            # 2. REDUCCIÓN DE TAMAÑO: Usamos HTML dentro de metric para forzar font-size: 24px (más fino)
+                            st.metric(label="Horas Trabajadas", value=f"<span style='font-size: 24px;'>{val_real_fmt}</span>")
+                            st.metric(label="Mudas Totales", value=f"<span style='font-size: 24px;'>{val_muda_fmt}</span>")
                             
                         with col_chart:
-                            # use_container_width=False obliga a Streamlit a respetar los 1600px de ancho y crea el scroll
                             st.plotly_chart(fig, use_container_width=False, theme=None)
                         
                         # --------------------------------------------------------------------------------
@@ -390,7 +389,7 @@ try:
                             )
                             
                             fig_ind.update_layout(
-                                width=1600, # Mantener la misma escala que el gráfico general superior
+                                width=1600, 
                                 height=200, 
                                 showlegend=True,
                                 legend_title="Actividades",
@@ -400,7 +399,7 @@ try:
                                     ticktext=tick_texts,
                                     title="Días Laborables",
                                     gridcolor='rgba(200, 200, 200, 0.4)',
-                                    range=[0, len(DIAS_VALIDOS) * 9]
+                                    range=[0, len(DIAS_VALIDOS) * 9] 
                                 ),
                                 yaxis=dict(title="")
                             )
@@ -410,7 +409,6 @@ try:
 
                             fig_ind.update_traces(textposition='auto', textfont_size=11)
                             
-                            # Lo encapsulamos también para el scroll
                             st.plotly_chart(fig_ind, use_container_width=False, theme=None)
 
                             # --- CUADRO DE RESUMEN DEL VEHÍCULO ---
@@ -420,15 +418,19 @@ try:
                             total_real_veh = df_plot_ind[df_plot_ind['Bloque'] != '⏳ Mudas de trabajo']['Duracion'].sum()
                             total_mudas_veh = df_plot_ind[df_plot_ind['Bloque'] == '⏳ Mudas de trabajo']['Duracion'].sum()
                             
-                            col_res1.metric("Tiempo Total Utilizado (Trabajo Real)", format_hours(total_real_veh))
-                            col_res2.metric("Tiempo Total de Mudas de Trabajo", format_hours(total_mudas_veh))
+                            # MEJORA VISUAL: También aplico la reducción de tamaño aquí para mantener coherencia
+                            val_real_veh_fmt = format_hours(total_real_veh)
+                            val_muda_veh_fmt = format_hours(total_mudas_veh)
+                            
+                            col_res1.metric(label="Tiempo Total Utilizado (Trabajo Real)", value=f"<span style='font-size: 24px;'>{val_real_veh_fmt}</span>")
+                            col_res2.metric(label="Tiempo Total de Mudas de Trabajo", value=f"<span style='font-size: 24px;'>{val_muda_veh_fmt}</span>")
                             
                             # --- DETALLE OPERATIVO (TABLAS) ---
                             st.markdown(f"### 📋 Detalle Operativo: {vehiculo_sel}")
                             
                             df_veh_det = df_vehiculos[df_vehiculos['Patente'] == vehiculo_sel].copy()
                             df_veh_det['Orden'] = df_veh_det['Bloque'].str.extract(r'(\d+)').astype(int)
-                            df_veh_det = df_veh_det.sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
+                            df_veh_det = df_vehiculos[df_vehiculos['Patente'] == vehiculo_sel].sort_values(['Orden', 'Dif (2)'], ascending=[True, False])
                             
                             bloques_presentes = df_veh_det['Bloque'].unique()
                             
