@@ -324,11 +324,9 @@ try:
                 st.divider()
                 st.markdown("""
                 **Análisis de Eficiencia Promedio por Fases:** El gráfico se lee de **Izquierda a Derecha**:
-                1. **Muda 2 (Gris Oscuro - Izquierda):** Promedio de tiempo que el vehículo esperó inactivo *antes* de iniciar esta fase (Ej: Lo que tardó en entrar a Cabina de Pintura desde que terminó el Preparado).
+                1. **Muda 2 (Gris Oscuro - Izquierda):** Promedio de tiempo que el vehículo esperó inactivo *antes* de iniciar esta fase.
                 2. **Trabajo Neto (Color - Centro):** Promedio general de horas reales de trabajo invertidas en esta etapa.
                 3. **Muda 1 (Gris Claro - Derecha):** Promedio de tiempo de interrupciones, pausas o saltos de días que ocurrieron *durante* la ejecución de esta misma fase.
-                
-                *Nota: El promedio de las Mudas se calcula dividiendo el tiempo muerto total **únicamente por la cantidad de vehículos únicos que efectivamente sufrieron esa interrupción**, revelando el impacto real del cuello de botella.*
                 """)
 
                 lista_bloques = sorted(df_gen['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
@@ -343,12 +341,10 @@ try:
                 for patente, df_v in df_gen.groupby('Patente'):
                     df_v = df_v.sort_values('Start_DT')
                     
-                    # 1. Trabajo Neto
                     for _, r in df_v.iterrows():
                         sum_work[r['Bloque']] += r['Dif (2)']
                         count_work[r['Bloque']].add(patente)
                     
-                    # 2. Muda 1 (Intra-Bloque)
                     for i in range(len(df_v) - 1):
                         b_curr = df_v.iloc[i]['Bloque']
                         b_next = df_v.iloc[i+1]['Bloque']
@@ -356,10 +352,8 @@ try:
                             gap = calc_working_hours(df_v.iloc[i]['End_DT'], df_v.iloc[i+1]['Start_DT'])
                             if gap > 0:
                                 sum_muda1[b_curr] += gap
-                                # .add() solo suma la patente 1 vez, si la patente ya existe en el set, la ignora para el divisor
                                 count_muda1[b_curr].add(patente) 
                     
-                    # 3. Muda 2 (Inter-Bloque)
                     end_b = df_v.groupby('Bloque')['End_DT'].max()
                     start_b = df_v.groupby('Bloque')['Start_DT'].min()
                     
@@ -372,7 +366,7 @@ try:
                                 gap2 = calc_working_hours(end_b[b_prev], start_b[b_curr])
                                 if gap2 > 0: 
                                     sum_muda2[b_curr] += gap2
-                                    count_muda2[b_curr].add(patente) # Misma lógica matemática del set() para Muda 2
+                                    count_muda2[b_curr].add(patente)
 
                 plot_data_avg = []
                 for b in lista_bloques:
@@ -380,17 +374,14 @@ try:
                     c_m1 = len(count_muda1[b])
                     c_m2 = len(count_muda2[b])
                     
-                    # 1. MUDA 2 (Izquierda) 
                     if c_m2 > 0:
                         avg_m2 = sum_muda2[b] / c_m2 
                         plot_data_avg.append({'Bloque': b, 'Componente': 'Muda 2 (Espera Inicio)', 'Promedio (Hs)': avg_m2, 'Texto': f"{format_hours(avg_m2)}"})
                     
-                    # 2. TRABAJO NETO (Centro) 
                     if c_w > 0:
                         avg_w = sum_work[b] / c_w
                         plot_data_avg.append({'Bloque': b, 'Componente': f'{b}', 'Promedio (Hs)': avg_w, 'Texto': f"{format_hours(avg_w)}"})
                     
-                    # 3. MUDA 1 (Derecha) 
                     if c_m1 > 0:
                         avg_m1 = sum_muda1[b] / c_m1 
                         plot_data_avg.append({'Bloque': b, 'Componente': 'Muda 1 (Intra-Bloque)', 'Promedio (Hs)': avg_m1, 'Texto': f"{format_hours(avg_m1)}"})
@@ -424,16 +415,29 @@ try:
                         hover_data={'Texto': True, 'Promedio (Hs)': False, 'Bloque': False}
                     )
                     
-                    fig_avg.update_layout(
-                        height=600,
-                        xaxis_title="Horas Promedio",
-                        yaxis_title="Fases de Trabajo",
-                        legend_title="Tiempos y Mudas",
-                        hovermode="closest"
-                    )
+                    fig_avg.update_layout(height=600, xaxis_title="Horas Promedio", yaxis_title="Fases de Trabajo", legend_title="Tiempos y Mudas", hovermode="closest")
                     fig_avg.update_traces(textposition='auto', textfont_size=12)
-                    
                     st.plotly_chart(fig_avg, use_container_width=True)
+                    
+                    # --- NUEVA HERRAMIENTA DE AUDITORÍA EXCLUSIVA PARA TI ---
+                    with st.expander("🛠️ Panel de Auditoría de Promedios (Ver datos exactos)"):
+                        st.markdown("Esta tabla te revela la 'caja negra' del gráfico: te muestra exactamente cuántas horas sumó el sistema, por cuántos vehículos dividió y cuáles son sus patentes.")
+                        audit_data = []
+                        for b in lista_bloques:
+                            m1_autos = " - ".join(list(count_muda1[b])) if count_muda1[b] else "-"
+                            m2_autos = " - ".join(list(count_muda2[b])) if count_muda2[b] else "-"
+                            
+                            audit_data.append({
+                                'Fase': b,
+                                'Total Hs Muda 1': format_hours(sum_muda1[b]),
+                                'Cant. Autos Muda 1': len(count_muda1[b]),
+                                'Patentes Afectadas (M1)': m1_autos,
+                                'Total Hs Muda 2': format_hours(sum_muda2[b]),
+                                'Cant. Autos Muda 2': len(count_muda2[b]),
+                                'Patentes Afectadas (M2)': m2_autos
+                            })
+                            
+                        st.dataframe(pd.DataFrame(audit_data), hide_index=True, use_container_width=True)
 
                 else:
                     st.info("No hay datos suficientes para calcular promedios globales.")
