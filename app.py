@@ -328,7 +328,7 @@ try:
                 2. **Trabajo Neto (Color - Centro):** Promedio general de horas reales de trabajo invertidas en esta etapa.
                 3. **Muda 1 (Gris Claro - Derecha):** Promedio de tiempo de interrupciones, pausas o saltos de días que ocurrieron *durante* la ejecución de esta misma fase.
                 
-                *Nota: El promedio de las Mudas se calcula dividiendo el tiempo muerto total **únicamente por la cantidad de vehículos que efectivamente sufrieron esa interrupción**, revelando el impacto real del cuello de botella.*
+                *Nota: El promedio de las Mudas se calcula dividiendo el tiempo muerto total **únicamente por la cantidad de vehículos únicos que efectivamente sufrieron esa interrupción**, revelando el impacto real del cuello de botella.*
                 """)
 
                 lista_bloques = sorted(df_gen['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
@@ -356,7 +356,8 @@ try:
                             gap = calc_working_hours(df_v.iloc[i]['End_DT'], df_v.iloc[i+1]['Start_DT'])
                             if gap > 0:
                                 sum_muda1[b_curr] += gap
-                                count_muda1[b_curr].add(patente) # Se anota qué auto sufrió esta muda
+                                # .add() solo suma la patente 1 vez, si la patente ya existe en el set, la ignora para el divisor
+                                count_muda1[b_curr].add(patente) 
                     
                     # 3. Muda 2 (Inter-Bloque)
                     end_b = df_v.groupby('Bloque')['End_DT'].max()
@@ -369,9 +370,9 @@ try:
                         if b_prev in end_b and b_curr in start_b:
                             if start_b[b_curr] >= end_b[b_prev]:
                                 gap2 = calc_working_hours(end_b[b_prev], start_b[b_curr])
-                                if gap2 > 0: # Solo si hubo brecha
+                                if gap2 > 0: 
                                     sum_muda2[b_curr] += gap2
-                                    count_muda2[b_curr].add(patente) # Se anota qué auto sufrió esta espera
+                                    count_muda2[b_curr].add(patente) # Misma lógica matemática del set() para Muda 2
 
                 plot_data_avg = []
                 for b in lista_bloques:
@@ -379,17 +380,17 @@ try:
                     c_m1 = len(count_muda1[b])
                     c_m2 = len(count_muda2[b])
                     
-                    # 1. MUDA 2 (Izquierda) - Dividido SOLO por los autos que sufrieron Muda 2
+                    # 1. MUDA 2 (Izquierda) 
                     if c_m2 > 0:
                         avg_m2 = sum_muda2[b] / c_m2 
                         plot_data_avg.append({'Bloque': b, 'Componente': 'Muda 2 (Espera Inicio)', 'Promedio (Hs)': avg_m2, 'Texto': f"{format_hours(avg_m2)}"})
                     
-                    # 2. TRABAJO NETO (Centro) - Dividido por TODOS los autos que trabajaron en el bloque
+                    # 2. TRABAJO NETO (Centro) 
                     if c_w > 0:
                         avg_w = sum_work[b] / c_w
                         plot_data_avg.append({'Bloque': b, 'Componente': f'{b}', 'Promedio (Hs)': avg_w, 'Texto': f"{format_hours(avg_w)}"})
                     
-                    # 3. MUDA 1 (Derecha) - Dividido SOLO por los autos que sufrieron Muda 1
+                    # 3. MUDA 1 (Derecha) 
                     if c_m1 > 0:
                         avg_m1 = sum_muda1[b] / c_m1 
                         plot_data_avg.append({'Bloque': b, 'Componente': 'Muda 1 (Intra-Bloque)', 'Promedio (Hs)': avg_m1, 'Texto': f"{format_hours(avg_m1)}"})
