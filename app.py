@@ -324,7 +324,7 @@ try:
                 st.divider()
                 st.markdown("""
                 **Análisis de Eficiencia Promedio por Fases:** El gráfico se lee de **Izquierda a Derecha**:
-                1. **Muda 2 (Gris Oscuro - Izquierda):** Promedio de tiempo que el vehículo esperó inactivo *antes* de iniciar esta fase según el flujograma teórico.
+                1. **Muda 2 (Gris Oscuro - Izquierda):** Promedio de tiempo que el vehículo esperó inactivo *antes* de iniciar esta fase.
                 2. **Trabajo Neto (Color - Centro):** Promedio general de horas reales de trabajo invertidas en esta etapa.
                 3. **Muda 1 (Gris Claro - Derecha):** Promedio de tiempo de interrupciones, pausas o saltos de días que ocurrieron *durante* la ejecución de esta misma fase.
                 """)
@@ -333,26 +333,18 @@ try:
                 
                 sum_work = {b: 0.0 for b in lista_bloques}
                 count_work = {b: set() for b in lista_bloques}
-                
                 sum_muda1 = {b: 0.0 for b in lista_bloques}
                 count_muda1 = {b: set() for b in lista_bloques}
-                
                 sum_muda2 = {b: 0.0 for b in lista_bloques}
                 count_muda2 = {b: set() for b in lista_bloques}
-                
-                # NUEVO: Diccionarios para MUDA 3
-                sum_muda3 = {b: 0.0 for b in lista_bloques}
-                count_muda3 = {b: set() for b in lista_bloques}
 
                 for patente, df_v in df_gen.groupby('Patente'):
                     df_v = df_v.sort_values('Start_DT')
                     
-                    # 1. Trabajo Neto
                     for _, r in df_v.iterrows():
                         sum_work[r['Bloque']] += r['Dif (2)']
                         count_work[r['Bloque']].add(patente)
                     
-                    # 2. Muda 1 (Intra-Bloque)
                     for i in range(len(df_v) - 1):
                         b_curr = df_v.iloc[i]['Bloque']
                         b_next = df_v.iloc[i+1]['Bloque']
@@ -362,7 +354,6 @@ try:
                                 sum_muda1[b_curr] += gap
                                 count_muda1[b_curr].add(patente) 
                     
-                    # 3. Muda 2 (Inter-Bloque - Teórico Flujograma)
                     end_b = df_v.groupby('Bloque')['End_DT'].max()
                     start_b = df_v.groupby('Bloque')['Start_DT'].min()
                     
@@ -377,19 +368,6 @@ try:
                                     sum_muda2[b_curr] += gap2
                                     count_muda2[b_curr].add(patente)
 
-                    # 4. NUEVO: Muda 3 (Inter-Bloque - Real Cronológico)
-                    for i in range(1, len(df_v)):
-                        b_prev_real = df_v.iloc[i-1]['Bloque']
-                        b_curr_real = df_v.iloc[i]['Bloque']
-                        
-                        if b_prev_real != b_curr_real: # Hubo un salto de actividad
-                            gap3 = calc_working_hours(df_v.iloc[i-1]['End_DT'], df_v.iloc[i]['Start_DT'])
-                            if gap3 > 0:
-                                sum_muda3[b_curr_real] += gap3
-                                # Al usar set(), si un auto tiene varias Muda 3 para la misma fase, se cuenta como 1 para el divisor
-                                count_muda3[b_curr_real].add(patente)
-
-                # Compilar datos para el gráfico
                 plot_data_avg = []
                 for b in lista_bloques:
                     c_w = len(count_work[b])
@@ -441,56 +419,25 @@ try:
                     fig_avg.update_traces(textposition='auto', textfont_size=12)
                     st.plotly_chart(fig_avg, use_container_width=True)
                     
-                    # --- PANEL DE AUDITORÍA ---
+                    # --- NUEVA HERRAMIENTA DE AUDITORÍA EXCLUSIVA PARA TI ---
                     with st.expander("🛠️ Panel de Auditoría de Promedios (Ver datos exactos)"):
                         st.markdown("Esta tabla te revela la 'caja negra' del gráfico: te muestra exactamente cuántas horas sumó el sistema, por cuántos vehículos dividió y cuáles son sus patentes.")
                         audit_data = []
                         for b in lista_bloques:
                             m1_autos = " - ".join(list(count_muda1[b])) if count_muda1[b] else "-"
                             m2_autos = " - ".join(list(count_muda2[b])) if count_muda2[b] else "-"
-                            m3_autos = " - ".join(list(count_muda3[b])) if count_muda3[b] else "-"
                             
                             audit_data.append({
                                 'Fase': b,
                                 'Total Hs Muda 1': format_hours(sum_muda1[b]),
-                                'Cant. Autos (M1)': len(count_muda1[b]),
+                                'Cant. Autos Muda 1': len(count_muda1[b]),
+                                'Patentes Afectadas (M1)': m1_autos,
                                 'Total Hs Muda 2': format_hours(sum_muda2[b]),
-                                'Cant. Autos (M2)': len(count_muda2[b]),
-                                'Total Hs Muda 3': format_hours(sum_muda3[b]),
-                                'Cant. Autos (M3)': len(count_muda3[b])
+                                'Cant. Autos Muda 2': len(count_muda2[b]),
+                                'Patentes Afectadas (M2)': m2_autos
                             })
                             
                         st.dataframe(pd.DataFrame(audit_data), hide_index=True, use_container_width=True)
-
-                    # --- NUEVO: TABLA DE RESUMEN DE PROMEDIOS ---
-                    st.divider()
-                    st.subheader("📋 Resumen de Promedios por Fase")
-                    st.markdown("Tabla comparativa de tiempos netos de trabajo y las tres tipologías de cuellos de botella (Mudas).")
-                    
-                    summary_data = []
-                    for b in lista_bloques:
-                        c_w = len(count_work[b])
-                        avg_w = sum_work[b] / c_w if c_w > 0 else 0
-                        
-                        c_m1 = len(count_muda1[b])
-                        avg_m1 = sum_muda1[b] / c_m1 if c_m1 > 0 else 0
-                        
-                        c_m2 = len(count_muda2[b])
-                        avg_m2 = sum_muda2[b] / c_m2 if c_m2 > 0 else 0
-                        
-                        c_m3 = len(count_muda3[b])
-                        avg_m3 = sum_muda3[b] / c_m3 if c_m3 > 0 else 0
-                        
-                        summary_data.append({
-                            'Fase / Bloque': b,
-                            'Trabajo Promedio': format_hours(avg_w),
-                            'MUDA 1 (Intra-Bloque)': format_hours(avg_m1),
-                            'MUDA 2 (Teórica Flujograma)': format_hours(avg_m2),
-                            'MUDA 3 (Real Cronológica)': format_hours(avg_m3)
-                        })
-                        
-                    df_summary = pd.DataFrame(summary_data)
-                    st.dataframe(df_summary, hide_index=True, use_container_width=True)
 
                 else:
                     st.info("No hay datos suficientes para calcular promedios globales.")
