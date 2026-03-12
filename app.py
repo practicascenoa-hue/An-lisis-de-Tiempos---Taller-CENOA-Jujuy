@@ -327,6 +327,8 @@ try:
                 1. **Muda 2 (Gris Oscuro - Izquierda):** Promedio de tiempo que el vehículo esperó inactivo *antes* de iniciar esta fase.
                 2. **Trabajo Neto (Color - Centro):** Promedio general de horas reales de trabajo invertidas en esta etapa.
                 3. **Muda 1 (Gris Claro - Derecha):** Promedio de tiempo de interrupciones, pausas o saltos de días que ocurrieron *durante* la ejecución de esta misma fase.
+                
+                *Nota: El promedio de las Mudas se calcula dividiendo el tiempo muerto total **únicamente por la cantidad de vehículos únicos que efectivamente sufrieron esa interrupción**, revelando el impacto real del cuello de botella.*
                 """)
 
                 lista_bloques = sorted(df_gen['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
@@ -341,10 +343,12 @@ try:
                 for patente, df_v in df_gen.groupby('Patente'):
                     df_v = df_v.sort_values('Start_DT')
                     
+                    # 1. Trabajo Neto
                     for _, r in df_v.iterrows():
                         sum_work[r['Bloque']] += r['Dif (2)']
                         count_work[r['Bloque']].add(patente)
                     
+                    # 2. Muda 1 (Intra-Bloque)
                     for i in range(len(df_v) - 1):
                         b_curr = df_v.iloc[i]['Bloque']
                         b_next = df_v.iloc[i+1]['Bloque']
@@ -354,6 +358,7 @@ try:
                                 sum_muda1[b_curr] += gap
                                 count_muda1[b_curr].add(patente) 
                     
+                    # 3. Muda 2 (Inter-Bloque)
                     end_b = df_v.groupby('Bloque')['End_DT'].max()
                     start_b = df_v.groupby('Bloque')['Start_DT'].min()
                     
@@ -374,14 +379,17 @@ try:
                     c_m1 = len(count_muda1[b])
                     c_m2 = len(count_muda2[b])
                     
+                    # 1. MUDA 2 (Izquierda) 
                     if c_m2 > 0:
                         avg_m2 = sum_muda2[b] / c_m2 
                         plot_data_avg.append({'Bloque': b, 'Componente': 'Muda 2 (Espera Inicio)', 'Promedio (Hs)': avg_m2, 'Texto': f"{format_hours(avg_m2)}"})
                     
+                    # 2. TRABAJO NETO (Centro) 
                     if c_w > 0:
                         avg_w = sum_work[b] / c_w
                         plot_data_avg.append({'Bloque': b, 'Componente': f'{b}', 'Promedio (Hs)': avg_w, 'Texto': f"{format_hours(avg_w)}"})
                     
+                    # 3. MUDA 1 (Derecha) 
                     if c_m1 > 0:
                         avg_m1 = sum_muda1[b] / c_m1 
                         plot_data_avg.append({'Bloque': b, 'Componente': 'Muda 1 (Intra-Bloque)', 'Promedio (Hs)': avg_m1, 'Texto': f"{format_hours(avg_m1)}"})
@@ -415,25 +423,40 @@ try:
                         hover_data={'Texto': True, 'Promedio (Hs)': False, 'Bloque': False}
                     )
                     
-                    fig_avg.update_layout(height=600, xaxis_title="Horas Promedio", yaxis_title="Fases de Trabajo", legend_title="Tiempos y Mudas", hovermode="closest")
+                    fig_avg.update_layout(
+                        height=600,
+                        xaxis_title="Horas Promedio",
+                        yaxis_title="Fases de Trabajo",
+                        legend_title="Tiempos y Mudas",
+                        hovermode="closest"
+                    )
                     fig_avg.update_traces(textposition='auto', textfont_size=12)
-                    st.plotly_chart(fig_avg, use_container_width=True)
                     
-                    # --- NUEVA HERRAMIENTA DE AUDITORÍA EXCLUSIVA PARA TI ---
+                    st.plotly_chart(fig_avg, use_container_width=True)
+
+                    # --- PANEL DE AUDITORÍA CON PROMEDIOS ---
                     with st.expander("🛠️ Panel de Auditoría de Promedios (Ver datos exactos)"):
-                        st.markdown("Esta tabla te revela la 'caja negra' del gráfico: te muestra exactamente cuántas horas sumó el sistema, por cuántos vehículos dividió y cuáles son sus patentes.")
+                        st.markdown("Esta tabla te revela la 'caja negra' del gráfico: te muestra exactamente cuántas horas sumó el sistema, por cuántos vehículos dividió, el **promedio exacto** graficado, y cuáles son sus patentes.")
                         audit_data = []
                         for b in lista_bloques:
-                            m1_autos = " - ".join(list(count_muda1[b])) if count_muda1[b] else "-"
-                            m2_autos = " - ".join(list(count_muda2[b])) if count_muda2[b] else "-"
+                            c_m1 = len(count_muda1[b])
+                            avg_m1 = sum_muda1[b] / c_m1 if c_m1 > 0 else 0
+                            m1_autos = " - ".join(list(count_muda1[b])) if c_m1 > 0 else "-"
+                            
+                            c_m2 = len(count_muda2[b])
+                            avg_m2 = sum_muda2[b] / c_m2 if c_m2 > 0 else 0
+                            m2_autos = " - ".join(list(count_muda2[b])) if c_m2 > 0 else "-"
                             
                             audit_data.append({
                                 'Fase': b,
-                                'Total Hs Muda 1': format_hours(sum_muda1[b]),
-                                'Cant. Autos Muda 1': len(count_muda1[b]),
+                                'Total Hs (Muda 1)': format_hours(sum_muda1[b]),
+                                'Cant. Autos (M1)': c_m1,
+                                'Promedio Graficado (M1)': format_hours(avg_m1),
                                 'Patentes Afectadas (M1)': m1_autos,
-                                'Total Hs Muda 2': format_hours(sum_muda2[b]),
-                                'Cant. Autos Muda 2': len(count_muda2[b]),
+                                
+                                'Total Hs (Muda 2)': format_hours(sum_muda2[b]),
+                                'Cant. Autos (M2)': c_m2,
+                                'Promedio Graficado (M2)': format_hours(avg_m2),
                                 'Patentes Afectadas (M2)': m2_autos
                             })
                             
