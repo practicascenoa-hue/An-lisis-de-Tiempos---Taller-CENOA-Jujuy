@@ -60,15 +60,14 @@ def create_dt(day, time_str):
 
 DIAS_VALIDOS = [2, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 26, 27, 28, 29, 30]
 
-# --- MOTOR EXPERTO DE HORAS HÁBILES (IGNORA ALMUERZO Y NOCHES) ---
+# --- MOTOR EXPERTO DE HORAS HÁBILES ---
 def get_time_in_hours(t): return t.hour + t.minute / 60.0
 
 def active_hours_in_day(t_start_hrs, t_end_hrs):
-    # Turno mañana: 8.5 a 13.0 (4.5 hs)
     p1_start = max(8.5, t_start_hrs)
     p1_end = min(13.0, t_end_hrs)
     p1_dur = max(0, p1_end - p1_start)
-    # Turno tarde: 14.0 a 18.5 (4.5 hs)
+    
     p2_start = max(14.0, t_start_hrs)
     p2_end = min(18.5, t_end_hrs)
     p2_dur = max(0, p2_end - p2_start)
@@ -143,6 +142,13 @@ def obtener_bloque(etapa):
         if etapa in sub: return b
     return "OTRO / NO CLASIFICADO"
 
+def limpiar_dano(val):
+    val = str(val).upper()
+    if 'A' in val: return 'A'
+    if 'B' in val: return 'B'
+    if 'C' in val: return 'C'
+    return None
+
 # 3. PROCESAMIENTO PRINCIPAL
 try:
     df_raw = load_data()
@@ -153,7 +159,7 @@ try:
     excluir_ops = ["ANDREA MARTINS", "JAVIER GUTIERREZ", "SAMUEL ANTUNEZ"]
     df = df_raw[~df_raw['Operario'].isin(excluir_ops)].copy()
     df['Bloque'] = df['Etapas'].apply(obtener_bloque)
-    df['Tipo Limpio'] = df['Tipo de Daño'].astype(str).str.upper()
+    df['Tipo Limpio'] = df['Tipo de Daño'].apply(limpiar_dano)
 
     day_start_x = {d: i * 9 for i, d in enumerate(DIAS_VALIDOS)}
 
@@ -175,7 +181,7 @@ try:
         c2.metric("Operarios de planta", 12)
 
     # --------------------------------------------------------------------------------
-    # 6. SUBMENÚ: ANÁLISIS TIPO DE DAÑOS (CÓDIGO 1 RESTAURADO Y MEJORADO)
+    # 6. SUBMENÚ: ANÁLISIS TIPO DE DAÑOS
     # --------------------------------------------------------------------------------
     elif opcion == "📈 Análisis tipo de DAÑOS":
         st.title("📈 Análisis tipo de DAÑOS")
@@ -250,7 +256,7 @@ try:
                         fig = px.bar(df_plot, x='Duracion', y='Patente', base='Base_Inicio', color='Bloque', orientation='h', text='Texto', hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden_Bloque': False}, category_orders={'Patente': orden_patentes_df}, color_discrete_map=color_map)
                         fig.update_layout(width=1600, height=max(500, len(orden_patentes_df) * 60), showlegend=True, legend_title="Actividades", xaxis=dict(tickmode='array', tickvals=tick_vals, ticktext=tick_texts, title="Días Laborables", gridcolor='rgba(200, 200, 200, 0.4)', range=[0, len(DIAS_VALIDOS) * 9]), yaxis=dict(title="", showgrid=True, gridcolor='rgba(150, 150, 150, 0.4)', gridwidth=1, griddash='dot'), hovermode="closest")
                         for val in tick_vals: fig.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
-                        fig.update_traces(textposition='auto', textfont_size=10) # Comportamiento inteligente restaurado
+                        fig.update_traces(textposition='auto', textfont_size=10) 
                         
                         col_kpi, col_chart = st.columns([1.5, 8.5])
                         with col_kpi:
@@ -269,7 +275,7 @@ try:
                             fig_ind = px.bar(df_plot_ind, x='Duracion', y='Patente', base='Base_Inicio', color='Bloque', orientation='h', text='Texto', hover_data={'Texto': True, 'Duracion': False, 'Base_Inicio': False, 'Orden_Bloque': False}, color_discrete_map=color_map)
                             fig_ind.update_layout(width=1600, height=200, showlegend=True, legend_title="Actividades", xaxis=dict(tickmode='array', tickvals=tick_vals, ticktext=tick_texts, title="Días Laborables", gridcolor='rgba(200, 200, 200, 0.4)', range=[0, len(DIAS_VALIDOS) * 9]), yaxis=dict(title=""), hovermode="closest")
                             for val in tick_vals: fig_ind.add_vline(x=val, line_dash="solid", line_color="black", opacity=0.3)
-                            fig_ind.update_traces(textposition='auto', textfont_size=11) # Comportamiento inteligente
+                            fig_ind.update_traces(textposition='auto', textfont_size=11) 
                             st.plotly_chart(fig_ind, use_container_width=False, theme=None)
 
                             st.markdown(f"### Resumen de Patente")
@@ -317,15 +323,16 @@ try:
             if not df_gen.empty:
                 st.divider()
                 st.markdown("""
-                **Análisis de Eficiencia por Fases:** Este gráfico muestra el promedio de horas netas dedicadas a cada bloque, junto con sus interrupciones:
-                - **Muda 1 (Gris Claro):** Tiempo muerto *dentro* de la misma etapa (ej. pausas de un día al otro sin avanzar a la siguiente fase).
-                - **Muda 2 (Gris Oscuro):** Tiempo de cuello de botella *entre* etapas (tiempo inactivo desde que termina un bloque hasta que el vehículo avanza al siguiente según flujograma).
+                **Análisis de Eficiencia Promedio por Fases:** El gráfico se lee de **Izquierda a Derecha**:
+                1. **Muda 2 (Gris Oscuro - Izquierda):** Promedio de tiempo que el vehículo esperó inactivo *antes* de iniciar esta fase (Ej: Lo que tardó en entrar a Cabina de Pintura desde que terminó el Preparado).
+                2. **Trabajo Neto (Color - Centro):** Promedio general de horas reales de trabajo invertidas en esta etapa.
+                3. **Muda 1 (Gris Claro - Derecha):** Promedio de tiempo de interrupciones, pausas o saltos de días que ocurrieron *durante* la ejecución de esta misma fase.
+                
+                *Nota: La fase "1. DESARME" no presenta Muda 2 (Gris oscuro) porque es el punto de inicio del flujograma y no "espera" a ninguna etapa anterior.*
                 """)
 
-                # Listado de bloques estandarizado
                 lista_bloques = sorted(df_gen['Bloque'].unique(), key=lambda x: int(x.split('.')[0]))
                 
-                # Diccionarios acumuladores
                 sum_work = {b: 0.0 for b in lista_bloques}
                 count_work = {b: set() for b in lista_bloques}
                 sum_muda1 = {b: 0.0 for b in lista_bloques}
@@ -333,16 +340,15 @@ try:
                 sum_muda2 = {b: 0.0 for b in lista_bloques}
                 count_muda2 = {b: set() for b in lista_bloques}
 
-                # Evaluar vehículo por vehículo
                 for patente, df_v in df_gen.groupby('Patente'):
                     df_v = df_v.sort_values('Start_DT')
                     
-                    # 1. Calcular Work (Trabajo real neto reportado en Dif 2)
+                    # 1. Trabajo Neto: Independiente, suma todas las horas reportadas.
                     for _, r in df_v.iterrows():
                         sum_work[r['Bloque']] += r['Dif (2)']
                         count_work[r['Bloque']].add(patente)
                     
-                    # 2. Calcular Muda 1 (Pausas Intra-Bloque sin interrupción de otra actividad)
+                    # 2. Muda 1 (Intra-Bloque): Brecha entre la misma tarea
                     for i in range(len(df_v) - 1):
                         b_curr = df_v.iloc[i]['Bloque']
                         b_next = df_v.iloc[i+1]['Bloque']
@@ -352,39 +358,40 @@ try:
                                 sum_muda1[b_curr] += gap
                                 count_muda1[b_curr].add(patente)
                     
-                    # 3. Calcular Muda 2 (Cuello de botella Inter-Bloque según flujograma)
-                    # Encontrar el fin máximo de cada bloque y el inicio mínimo de cada bloque para este vehículo
+                    # 3. Muda 2 (Inter-Bloque): Espera para Iniciar la tarea
                     end_b = df_v.groupby('Bloque')['End_DT'].max()
                     start_b = df_v.groupby('Bloque')['Start_DT'].min()
                     
                     for k in range(len(lista_bloques) - 1):
-                        b_curr = lista_bloques[k]
-                        b_next = lista_bloques[k+1]
-                        # Si el vehículo tiene ambos bloques, evaluamos si respetó el orden
-                        if b_curr in end_b and b_next in start_b:
-                            if start_b[b_next] >= end_b[b_curr]:
-                                gap2 = calc_working_hours(end_b[b_curr], start_b[b_next])
+                        b_prev = lista_bloques[k]
+                        b_curr = lista_bloques[k+1] # b_curr es el que "sufre" la espera (Ej. Chapa espera a Desarme)
+                        
+                        if b_prev in end_b and b_curr in start_b:
+                            if start_b[b_curr] >= end_b[b_prev]:
+                                gap2 = calc_working_hours(end_b[b_prev], start_b[b_curr])
                                 sum_muda2[b_curr] += gap2
                                 count_muda2[b_curr].add(patente)
 
-                # Compilar los promedios
+                # Compilar datos ordenados lógicamente
                 plot_data_avg = []
                 for b in lista_bloques:
                     c_w = len(count_work[b])
+                    c_m2 = len(count_muda2[b])
+                    
+                    # 1. MUDA 2 (Izquierda) - Tiempo de espera para iniciar
+                    avg_m2 = sum_muda2[b] / c_m2 if c_m2 > 0 else 0
+                    if avg_m2 > 0:
+                        plot_data_avg.append({'Bloque': b, 'Componente': 'Muda 2 (Espera Inicio)', 'Promedio (Hs)': avg_m2, 'Texto': f"{format_hours(avg_m2)}"})
+                    
+                    # 2. TRABAJO NETO (Centro) - Promedio independiente
                     if c_w > 0:
                         avg_w = sum_work[b] / c_w
                         plot_data_avg.append({'Bloque': b, 'Componente': f'{b}', 'Promedio (Hs)': avg_w, 'Texto': f"{format_hours(avg_w)}"})
                     
-                    c_m1 = len(count_muda1[b])
-                    # Si no hay vehiculos con muda, el promedio es 0
+                    # 3. MUDA 1 (Derecha) - Interrupciones intra-bloque
                     avg_m1 = sum_muda1[b] / c_w if c_w > 0 else 0
                     if avg_m1 > 0:
                         plot_data_avg.append({'Bloque': b, 'Componente': 'Muda 1 (Intra-Bloque)', 'Promedio (Hs)': avg_m1, 'Texto': f"{format_hours(avg_m1)}"})
-                    
-                    c_m2 = len(count_muda2[b])
-                    avg_m2 = sum_muda2[b] / c_m2 if c_m2 > 0 else 0
-                    if avg_m2 > 0:
-                        plot_data_avg.append({'Bloque': b, 'Componente': 'Muda 2 (Espera Siguiente)', 'Promedio (Hs)': avg_m2, 'Texto': f"{format_hours(avg_m2)}"})
 
                 df_avg = pd.DataFrame(plot_data_avg)
                 
@@ -392,11 +399,14 @@ try:
                     # Configuración visual
                     colores_base = px.colors.qualitative.Plotly
                     color_map_avg = {
-                        'Muda 1 (Intra-Bloque)': '#d3d3d3', # Gris claro
-                        'Muda 2 (Espera Siguiente)': '#8b8b8b' # Gris oscuro
+                        'Muda 1 (Intra-Bloque)': '#d3d3d3', # Gris claro (Derecha)
+                        'Muda 2 (Espera Inicio)': '#8b8b8b' # Gris oscuro (Izquierda)
                     }
                     for i, b in enumerate(lista_bloques):
                         color_map_avg[b] = colores_base[i % len(colores_base)]
+
+                    # Forzamos el orden de apilamiento en Plotly: Muda 2 -> Trabajo -> Muda 1
+                    orden_componentes = ['Muda 2 (Espera Inicio)'] + lista_bloques + ['Muda 1 (Intra-Bloque)']
 
                     fig_avg = px.bar(
                         df_avg,
@@ -406,7 +416,10 @@ try:
                         orientation='h',
                         text='Texto',
                         title=f"Desglose de Tiempos Promedio - DAÑO {tipo}",
-                        category_orders={'Bloque': lista_bloques[::-1]}, # Invertimos para que Desarme quede arriba
+                        category_orders={
+                            'Bloque': lista_bloques[::-1], # Invertimos eje Y para que Desarme quede arriba
+                            'Componente': orden_componentes # Fuerza el apilamiento visual de Izq a Der
+                        }, 
                         color_discrete_map=color_map_avg,
                         hover_data={'Texto': True, 'Promedio (Hs)': False, 'Bloque': False}
                     )
